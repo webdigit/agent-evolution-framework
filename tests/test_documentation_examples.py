@@ -27,20 +27,24 @@ AUTO_MEMORY_PATH = "`~/.claude/projects/<project>/memory/`"
 
 def _assert_auto_memory_location_is_qualified(text: str) -> None:
     normalized = " ".join(text.split())
-    assert "Auto Memory" in normalized
     assert re.search(
-        r"By default,\s+Claude Code stores (?:Auto Memory|it) under\s+"
-        + re.escape(AUTO_MEMORY_PATH),
+        r"By default,?\s+Claude Code stores (?:Auto Memory|it) under\s+"
+        + rf"(?-i:{re.escape(AUTO_MEMORY_PATH)})",
         normalized,
+        re.IGNORECASE,
     )
     assert re.search(
         r"(?:Claude Code can configure a different location through|"
-        r"A different location can be configured with)\s+`autoMemoryDirectory`",
+        r"A different location can be configured with)\s+"
+        r"(?-i:`autoMemoryDirectory`)",
         normalized,
+        re.IGNORECASE,
     )
-    assert (
-        "AEF does not read those settings to resolve `autoMemoryDirectory`."
-        in normalized
+    assert re.search(
+        r"AEF does not read those settings to resolve\s+"
+        r"(?-i:`autoMemoryDirectory`)(?![A-Za-z0-9_])",
+        normalized,
+        re.IGNORECASE,
     )
 
 
@@ -217,6 +221,37 @@ def test_documentation_links_and_command_claims_are_current():
         "A different location can be configured. AEF does not read those settings "
         "to resolve `autoMemoryDirectory`."
     ),
+    (
+        "By default, AEF uses project scope. Claude Code stores Auto Memory under "
+        "an unspecified location. Claude Code can configure a different location "
+        "through `autoMemoryDirectory`. AEF does not read those settings to resolve "
+        "`autoMemoryDirectory`."
+    ),
+    (
+        f"By default, Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "Claude Code can configure a different location through another setting. "
+        "AEF does not read those settings to resolve `autoMemoryDirectory`."
+    ),
+    (
+        f"By default, Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "Claude Code can configure this behavior through `autoMemoryDirectory`. "
+        "AEF does not read those settings to resolve `autoMemoryDirectory`."
+    ),
+    (
+        f"By default, Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "Claude Code can configure a different location through `autoMemoryDirectory`."
+    ),
+    (
+        "By default, Claude Code stores Auto Memory under "
+        "`~/.claude/projects/<PROJECT>/memory/`. Claude Code can configure a "
+        "different location through `autoMemoryDirectory`. AEF does not read those "
+        "settings to resolve `autoMemoryDirectory`."
+    ),
+    (
+        f"By default, Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "Claude Code can configure a different location through `automemorydirectory`. "
+        "AEF does not read those settings to resolve `automemorydirectory`."
+    ),
 ])
 def test_auto_memory_location_contract_rejects_unqualified_variants(text):
     with pytest.raises(AssertionError):
@@ -235,6 +270,16 @@ def test_auto_memory_location_contract_rejects_unqualified_variants(text):
         f"under {AUTO_MEMORY_PATH}. A different location can be configured with "
         "`autoMemoryDirectory`. AEF does not read those settings to resolve "
         "`autoMemoryDirectory`."
+    ),
+    (
+        f"By default Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "Claude Code can configure a different location through `autoMemoryDirectory`. "
+        "AEF does not read those settings to resolve `autoMemoryDirectory`"
+    ),
+    (
+        f"BY DEFAULT, Claude Code stores Auto Memory under {AUTO_MEMORY_PATH}. "
+        "A different location can be configured with `autoMemoryDirectory`. "
+        "AEF does not read those settings to resolve `autoMemoryDirectory`"
     ),
 ])
 def test_auto_memory_location_contract_accepts_qualified_variants(text):
