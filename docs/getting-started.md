@@ -1,5 +1,18 @@
 # Getting started
 
+## Install AEF
+
+You can install the tagged Git source when Git is available. The release wheel
+does not require Git:
+
+```console
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/agent_evolution_framework-1.0.0-py3-none-any.whl"
+```
+
+Pip can still need network access for dependencies, so this is not a complete
+air-gap installation. Download and verify `SHA256SUMS.txt` when installation
+integrity must be checked.
+
 ## 1. Initialize one project
 
 Change into the project that should own the AEF state:
@@ -11,6 +24,28 @@ aef init --role generalist-agent
 
 AEF creates `.agent/` in that project. It does not read AEF state from parent
 directories, another project, or your home directory.
+
+To inspect a new initialization without writing it, generate stable values
+once in PowerShell:
+
+```powershell
+$instanceId = [guid]::NewGuid().ToString()
+$createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+aef --workspace "C:\path\to\project" init `
+  --role generalist-agent `
+  --instance-id $instanceId `
+  --created-at $createdAt `
+  --dry-run
+
+aef --workspace "C:\path\to\project" init `
+  --role generalist-agent `
+  --instance-id $instanceId `
+  --created-at $createdAt
+```
+
+The second command must reuse the same values; generating new values would no
+longer apply the plan that was reviewed.
 
 ## 2. Check the workspace
 

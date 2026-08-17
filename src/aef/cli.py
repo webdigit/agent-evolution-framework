@@ -692,8 +692,15 @@ def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         if missing:
             raise CLIInputError(
                 "dry_run_requires_stable_inputs",
-                "A new workspace dry-run requires explicit instance ID and creation timestamp.",
-                {"missing": missing},
+                (
+                    "INIT dry-run requires --instance-id and --created-at. "
+                    "Reuse the same values when applying the initialization."
+                ),
+                {
+                    "missing": missing,
+                    "required_options": ["--instance-id", "--created-at"],
+                    "reuse_for_apply": True,
+                },
             )
 
     if args.created_at is not None and not args.created_at.strip():

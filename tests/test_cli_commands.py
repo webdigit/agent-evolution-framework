@@ -166,10 +166,52 @@ def test_new_workspace_dry_run_requires_all_stable_inputs_before_generation(
     assert code == 3
     assert envelope["error"] == {
         "code": "dry_run_requires_stable_inputs",
-        "message": "A new workspace dry-run requires explicit instance ID and creation timestamp.",
-        "details": {"missing": missing},
+        "message": (
+            "INIT dry-run requires --instance-id and --created-at. "
+            "Reuse the same values when applying the initialization."
+        ),
+        "details": {
+            "missing": missing,
+            "required_options": ["--instance-id", "--created-at"],
+            "reuse_for_apply": True,
+        },
     }
     assert not tmp_path.exists() or list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("mode", ["--json", "--compact"])
+def test_new_workspace_dry_run_reports_stable_inputs_in_machine_modes(
+    tmp_path, capsys, mode
+):
+    code = cli.main([
+        mode, "--workspace", str(tmp_path), "init", "--role", "operator", "--dry-run",
+    ])
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+
+    assert code == 3
+    assert envelope["error"]["code"] == "dry_run_requires_stable_inputs"
+    assert envelope["error"]["details"] == {
+        "missing": ["instance_id", "created_at"],
+        "required_options": ["--instance-id", "--created-at"],
+        "reuse_for_apply": True,
+    }
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_new_workspace_dry_run_explains_stable_inputs_in_human_mode(tmp_path, capsys):
+    code = cli.main([
+        "--human", "--workspace", str(tmp_path), "init", "--role", "operator", "--dry-run",
+    ])
+    captured = capsys.readouterr()
+
+    assert code == 3
+    assert captured.out == (
+        "[ERROR] INIT dry-run requires --instance-id and --created-at. "
+        "Reuse the same values when applying the initialization.\n\n"
+        "Code      : dry_run_requires_stable_inputs\n"
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_explicit_dry_run_plan_matches_equivalent_real_write_bytes(tmp_path, capsys):
@@ -763,7 +805,11 @@ def test_blank_timestamp_counts_as_missing_for_new_dry_run(tmp_path, capsys, mon
 
     assert code == 3
     assert envelope["error"]["code"] == "dry_run_requires_stable_inputs"
-    assert envelope["error"]["details"] == {"missing": ["created_at"]}
+    assert envelope["error"]["details"] == {
+        "missing": ["created_at"],
+        "required_options": ["--instance-id", "--created-at"],
+        "reuse_for_apply": True,
+    }
 
 
 @pytest.mark.parametrize(("option", "value", "error_code"), [
