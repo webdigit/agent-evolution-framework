@@ -126,7 +126,11 @@ def test_example_results_cross_validate_with_persisted_schemas():
 
 def test_documentation_links_and_command_claims_are_current():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    installation = (ROOT / "docs/installation.md").read_text(encoding="utf-8")
+    getting_started = (ROOT / "docs/getting-started.md").read_text(encoding="utf-8")
     commands = (ROOT / "docs/commands.md").read_text(encoding="utf-8")
+    troubleshooting = (ROOT / "docs/troubleshooting.md").read_text(encoding="utf-8")
+    claude = (ROOT / "docs/claude-integration.md").read_text(encoding="utf-8")
     guide = (ROOT / "docs/input-files.md").read_text(encoding="utf-8")
 
     assert (ROOT / "docs/input-files.md").is_file()
@@ -140,3 +144,29 @@ def test_documentation_links_and_command_claims_are_current():
     assert "--list` is strictly read-only" in commands
     assert "--refresh` can modify" in commands
     assert "Personal User Name" not in guide
+
+    wheel_url = (
+        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/"
+        "agent_evolution_framework-1.0.0-py3-none-any.whl"
+    )
+    for document in (readme, installation, getting_started):
+        assert wheel_url in document
+        assert "does not require Git" in document
+        assert "air-gap" in document
+        assert "SHA256SUMS.txt" in document
+        assert "pip install agent-evolution-framework" not in document
+
+    for document in (readme, getting_started, commands, troubleshooting):
+        assert "--instance-id" in document
+        assert "--created-at" in document
+        assert "same values" in document
+    assert "dry_run_requires_stable_inputs" in troubleshooting
+
+    assert ".claude/CLAUDE.md" in claude
+    assert "@../.agent/core/" in claude
+    assert "sibling" in claude
+    assert "~/.claude/projects/<project>/memory/" in claude
+    assert "https://code.claude.com/docs/en/memory" in claude
+    assert "does not inspect, modify, or normalize `~/.claude`" in claude
+    assert "Auto Memory does not write to `.claude/CLAUDE.md`" in claude
+    assert "Auto Memory writes to `.claude/CLAUDE.md`" not in claude
