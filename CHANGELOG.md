@@ -2,6 +2,18 @@
 
 All notable changes to AEF are documented in this file.
 
+## [1.0.1] - Unreleased
+
+### Fixed
+
+- Clearer INIT dry-run stable-input guidance.
+
+### Documentation
+
+- Direct wheel installation without requiring Git.
+- Claude bridge directory layout.
+- Claude Code Auto Memory and user-memory boundaries.
+
 ## [1.0.0]
 
 Initial public V1 release.
@@ -26,3 +38,4 @@ Initial public V1 release.
   1.0.0 and is not open source.
 
 [1.0.0]: https://github.com/webdigit/agent-evolution-framework/releases/tag/v1.0.0
+[1.0.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.0...HEAD
