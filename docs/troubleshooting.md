@@ -16,6 +16,30 @@ aef init --role generalist-agent
 An existing incompatible identity or version is not overwritten. Preserve the
 workspace and inspect the JSON result with `aef --json init ...`.
 
+## `dry_run_requires_stable_inputs`
+
+A first INIT dry-run cannot generate an identity or timestamp that would differ
+from the subsequent write. Supply both options and reuse the same values for
+the dry-run and application:
+
+```powershell
+$instanceId = [guid]::NewGuid().ToString()
+$createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+aef init --role generalist-agent --instance-id $instanceId --created-at $createdAt --dry-run
+aef init --role generalist-agent --instance-id $instanceId --created-at $createdAt
+```
+
+Neither command should regenerate `--instance-id` or `--created-at` between
+planning and application.
+
+## Install without Git
+
+Install the release wheel when Git is unavailable. This does not require Git,
+but pip can still need network access for dependencies and it is not a complete
+air-gap workflow. Download `SHA256SUMS.txt` with the wheel when verification is
+required. See [Installation](installation.md).
+
 ## AUDIT reports missing or invalid state
 
 AUDIT never repairs files. Restore the affected project-local file from a known

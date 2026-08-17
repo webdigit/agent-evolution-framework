@@ -17,7 +17,9 @@ aef init --role ROLE [--instance-id ID] [--created-at RFC3339] [--dry-run]
 ```
 
 Creates the official AEF V1 project state. A new-workspace dry-run requires an
-explicit instance ID and creation timestamp. Replaying identical input returns
+explicit `--instance-id` and `--created-at`. Reuse the same values when running
+the real initialization so it applies the plan that was reviewed. AEF does not
+generate temporary dry-run values. Replaying identical input returns
 `NO_CHANGE`.
 
 ## AUDIT

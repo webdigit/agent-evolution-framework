@@ -11,12 +11,22 @@ level changes remain controlled by policy and explicit human decisions.
 
 ## Install
 
-AEF V1 requires Python 3.11 or later. Until a package index release is
-announced, install the tagged source directly from GitHub:
+AEF V1 requires Python 3.11 or later. Install the tagged source from GitHub
+when Git is available:
 
 ```console
 python -m pip install "agent-evolution-framework @ git+https://github.com/webdigit/agent-evolution-framework.git@v1.0.0"
 ```
+
+Alternatively, install the release wheel directly. This method does not require Git:
+
+```console
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/agent_evolution_framework-1.0.0-py3-none-any.whl"
+```
+
+Pip may still need network access to install dependencies, so the wheel alone
+is not a complete air-gap installation. For a verified installation, download
+`SHA256SUMS.txt` from the same release and verify the wheel before installing.
 
 Verify both entry points:
 
@@ -41,6 +51,17 @@ aef audit
 
 Initialization creates a project-local `.agent/` workspace. AEF does not
 inherit state from a parent project or a user directory.
+
+For a reproducible first dry-run, generate the identity and timestamp once and
+reuse the same values for the real initialization:
+
+```powershell
+$instanceId = [guid]::NewGuid().ToString()
+$createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+aef init --role generalist-agent --instance-id $instanceId --created-at $createdAt --dry-run
+aef init --role generalist-agent --instance-id $instanceId --created-at $createdAt
+```
 
 In plain language, you can now tell your agent: “Use this project's AEF rules,
 record evidence from completed work, and tell me when a promotion review is
