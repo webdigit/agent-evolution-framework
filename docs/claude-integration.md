@@ -72,8 +72,12 @@ explicit user request and the relevant AEF command.
 ## Claude Code memory boundaries
 
 Claude Code's `CLAUDE.md` instructions and Auto Memory are separate mechanisms.
-Auto Memory does not write to `.claude/CLAUDE.md`; Claude Code stores it under
-`~/.claude/projects/<project>/memory/`. See the official
+Auto Memory does not write to `.claude/CLAUDE.md` or the managed AEF bridge
+segment. By default, Claude Code stores Auto Memory under
+`~/.claude/projects/<project>/memory/`. Claude Code can configure a different
+location through `autoMemoryDirectory` in its supported user or policy
+settings. AEF does not read those settings to resolve `autoMemoryDirectory`.
+See the official
 [Claude Code memory documentation](https://code.claude.com/docs/en/memory).
 
 Claude Code can load user or organization instructions in addition to project

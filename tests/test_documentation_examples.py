@@ -165,8 +165,14 @@ def test_documentation_links_and_command_claims_are_current():
     assert ".claude/CLAUDE.md" in claude
     assert "@../.agent/core/" in claude
     assert "sibling" in claude
-    assert "~/.claude/projects/<project>/memory/" in claude
-    assert "https://code.claude.com/docs/en/memory" in claude
+    memory_section = claude.split("## Claude Code memory boundaries", 1)[1]
+    assert "By default" in memory_section
+    assert "~/.claude/projects/<project>/memory/" in memory_section
+    assert "`autoMemoryDirectory`" in memory_section
+    assert "does not read those settings to resolve `autoMemoryDirectory`" in memory_section
+    assert "Claude Code stores it under" not in memory_section
+    assert "always stores" not in memory_section
+    assert "https://code.claude.com/docs/en/memory" in memory_section
     assert "does not inspect, modify, or normalize `~/.claude`" in claude
     assert "Auto Memory does not write to `.claude/CLAUDE.md`" in claude
     assert "Auto Memory writes to `.claude/CLAUDE.md`" not in claude
