@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/knowledge.schema.json",
+  "title": "AEF Knowledge State",
+  "description": "Principles are canonical knowledge. Mistakes remain optional and are preserved when present. A legacy document containing mistakes but no principles remains valid.",
+  "type": "object",
+  "required": ["observations", "hypotheses", "rules"],
+  "anyOf": [
+    {"required": ["principles"]},
+    {"required": ["mistakes"]}
+  ],
+  "properties": {
+    "signals": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/record"}
+    },
+    "observations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/record"}
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/record"}
+    },
+    "rules": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/rule"}
+    },
+    "principles": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/principle"}
+    },
+    "mistakes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/record"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "minLength": 1},
+        "status": {"enum": ["active", "candidate", "specialized", "retired", "superseded"]},
+        "summary": {"type": "string"},
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "supersedes": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "rule": {
+      "allOf": [
+        {"$ref": "#/$defs/record"},
+        {
+          "if": {
+            "properties": {"status": {"const": "specialized"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["context", "lifecycle"],
+            "properties": {
+              "context": {
+                "type": "object",
+                "minProperties": 1
+              },
+              "lifecycle": {
+                "type": "object",
+                "required": ["specialized"],
+                "properties": {
+                  "specialized": {
+                    "$ref": "#/$defs/specializedEvent"
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "superseded"}}, "required": ["status"]},
+          "then": {
+            "required": ["superseded_by", "lifecycle"],
+            "properties": {
+              "superseded_by": {"type": "string", "minLength": 1},
+              "lifecycle": {
+                "type": "object",
+                "required": ["superseded"],
+                "properties": {"superseded": {"$ref": "#/$defs/supersededEvent"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "retired"}}, "required": ["status"]},
+          "then": {
+            "required": ["lifecycle"],
+            "properties": {
+              "lifecycle": {
+                "type": "object",
+                "required": ["retired"],
+                "properties": {"retired": {"$ref": "#/$defs/retiredEvent"}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "approval": {
+      "type": "object",
+      "required": ["approved", "source", "actor", "approved_at"],
+      "properties": {
+        "approved": {"const": true},
+        "source": {"const": "human"},
+        "actor": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+        "approved_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "historicalLifecycleEvent": {
+      "type": "object",
+      "required": ["reason", "evidence_ids"],
+      "properties": {
+        "reason": {"type": "string", "minLength": 1},
+        "evidence_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      }
+    },
+    "reviewedLifecycleEvent": {
+      "allOf": [{"$ref": "#/$defs/historicalLifecycleEvent"}],
+      "type": "object",
+      "required": ["review_id", "action", "approval"],
+      "properties": {
+        "review_id": {"type": "string", "minLength": 1},
+        "action": {"enum": ["specialize", "supersede", "retire"]},
+        "approval": {"$ref": "#/$defs/approval"}
+      }
+    },
+    "canonicalLifecycleEvent": {
+      "allOf": [{"$ref": "#/$defs/reviewedLifecycleEvent"}],
+      "type": "object",
+      "required": ["rule_id"],
+      "properties": {"rule_id": {"type": "string", "minLength": 1}}
+    },
+    "replacement": {
+      "type": "object",
+      "required": ["id", "type", "status", "pattern_key", "evidence_ids"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "type": {"const": "rule"},
+        "status": {"const": "active"}, "pattern_key": {"type": "string", "minLength": 1},
+        "evidence_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "specializedEvent": {
+      "oneOf": [
+        {"allOf": [{"$ref": "#/$defs/historicalLifecycleEvent"}], "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/reviewedLifecycleEvent"}], "properties": {"action": {"const": "specialize"}, "context": {"type": "object", "minProperties": 1}}, "required": ["context"], "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/canonicalLifecycleEvent"}], "properties": {"action": {"const": "specialize"}, "context": {"type": "object", "minProperties": 1}}, "required": ["context"], "unevaluatedProperties": false}
+      ]
+    },
+    "supersededEvent": {
+      "oneOf": [
+        {"allOf": [{"$ref": "#/$defs/historicalLifecycleEvent"}], "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/reviewedLifecycleEvent"}], "properties": {"action": {"const": "supersede"}, "replacement_id": {"type": "string", "minLength": 1}}, "required": ["replacement_id"], "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/canonicalLifecycleEvent"}], "properties": {"action": {"const": "supersede"}, "replacement": {"$ref": "#/$defs/replacement"}}, "required": ["replacement"], "unevaluatedProperties": false}
+      ]
+    },
+    "retiredEvent": {
+      "oneOf": [
+        {"allOf": [{"$ref": "#/$defs/historicalLifecycleEvent"}], "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/reviewedLifecycleEvent"}], "properties": {"action": {"const": "retire"}}, "unevaluatedProperties": false},
+        {"allOf": [{"$ref": "#/$defs/canonicalLifecycleEvent"}], "properties": {"action": {"const": "retire"}}, "unevaluatedProperties": false}
+      ]
+    },
+    "principle": {
+      "allOf": [
+        {"$ref": "#/$defs/record"},
+        {
+          "required": ["type", "derived_from", "human_approved"],
+          "properties": {
+            "type": {"const": "principle"},
+            "derived_from": {"type": "string", "minLength": 1},
+            "human_approved": {"const": true}
+          }
+        }
+      ]
+    }
+  }
+}

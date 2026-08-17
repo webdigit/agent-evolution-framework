@@ -1,0 +1,19 @@
+{
+  "decisions": [
+    {
+      "approval": {
+        "actor": "Alex Example",
+        "approved": true,
+        "approved_at": "2026-08-15T10:00:00Z",
+        "source": "human"
+      },
+      "decision": "approve",
+      "expected_current_evidence_digest": "sha256:0040087530564ecf50925019a020cfe486ccf3c4c49d13fdd6d311432b443d92",
+      "expected_evidence_digest": "sha256:0040087530564ecf50925019a020cfe486ccf3c4c49d13fdd6d311432b443d92",
+      "id": "evaluation:promotion:example-001",
+      "reason": "The current evidence supports this one-level promotion.",
+      "recommendation_id": "promotion:career:global:L1:L2"
+    }
+  ],
+  "protocol": "aef.evaluate/v1"
+}

@@ -1,0 +1,1238 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+import unicodedata
+import uuid
+import stat
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from ._version import __version__
+
+from .decisions import (
+    ROLE_DECISION_ID,
+    InvalidDecisionsDocumentError,
+    validate_decisions_document,
+)
+from .filesystem import (
+    EvaluationRecoveryRequiredError,
+    apply_workspace,
+    load_workspace,
+    plan_workspace,
+)
+from .consolidation import InvalidConsolidationInputError
+from .knowledge_state import InvalidKnowledgeStateError
+from .evaluation_engine import (
+    InvalidCareerStateError,
+    InvalidCompetencyStateError,
+    InvalidEvaluationDecisionsError,
+    evaluate_project,
+    list_project_recommendations,
+    refresh_project_recommendations,
+)
+from .evaluation_transaction import (
+    InvalidEvaluationTransactionError,
+    apply_evaluation_transaction,
+    recover_evaluation_transaction,
+)
+from .promotion_recommendations import InvalidPromotionRecommendationStateError
+from .claude_filesystem import (
+    ClaudeIntegrationFilesystemError,
+    apply_claude_bridge,
+    claude_bridge_diff,
+    read_claude_bridge,
+    validate_claude_doctrine_files,
+)
+from .claude_integration import (
+    plan_claude_integration, validate_claude_integration_workspace,
+)
+from .operations import (
+    InvalidDiscoveryRegistryError,
+    InvalidDiscoverySnapshotError,
+    audit_project,
+    discover_project,
+    consolidate_project,
+    init_project,
+)
+
+
+API_VERSION = "aef.cli/v1"
+ROLE_DECISION = ROLE_DECISION_ID
+
+
+class CLIInputError(ValueError):
+    """A stable, intentionally public CLI input error."""
+
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None):
+        self.code = code
+        self.public_message = message
+        self.details = details or {}
+        super().__init__(message)
+
+
+def _distribution_version() -> str:
+    return __version__
+
+
+def _envelope(
+    *,
+    command: str,
+    workspace: str | Path,
+    status: str,
+    ok: bool,
+    dry_run: bool,
+    result: dict[str, Any],
+    meta: dict[str, Any],
+    diff: dict[str, list[str]] | None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "api_version": API_VERSION,
+        "command": command,
+        "ok": ok,
+        "status": status,
+        "workspace": Path(workspace).resolve().as_posix(),
+        "dry_run": dry_run,
+        "result": result,
+        "meta": meta,
+        "diff": diff,
+        "error": error,
+    }
+
+
+def _write_envelope(envelope: dict[str, Any], *, compact: bool) -> None:
+    if compact:
+        payload = json.dumps(envelope, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    else:
+        payload = json.dumps(envelope, ensure_ascii=True, sort_keys=True, indent=2)
+    _write_stdout(payload + "\n")
+
+
+def _write_stdout(payload: str) -> None:
+    """Write once, escaping characters unsupported by the terminal encoding."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    safe_payload = payload.encode(encoding, "backslashreplace").decode(encoding)
+    sys.stdout.write(safe_payload)
+
+
+def _escape_human_value(value: Any) -> str:
+    """Make one dynamic terminal value visible and single-line safe."""
+    try:
+        text = str(value)
+    except Exception:
+        text = "unavailable"
+    named = {
+        "\n": r"\n",
+        "\r": r"\r",
+        "\t": r"\t",
+        "\b": r"\b",
+        "\f": r"\f",
+        "\x1b": r"\x1b",
+    }
+    escaped = []
+    for character in text:
+        if character in named:
+            escaped.append(named[character])
+            continue
+        codepoint = ord(character)
+        category = unicodedata.category(character)
+        if (
+            codepoint <= 0x1F
+            or 0x7F <= codepoint <= 0x9F
+            or category in {"Cc", "Cf", "Zl", "Zp"}
+        ):
+            if codepoint <= 0xFF:
+                escaped.append(f"\\x{codepoint:02x}")
+            elif codepoint <= 0xFFFF:
+                escaped.append(f"\\u{codepoint:04x}")
+            else:
+                escaped.append(f"\\U{codepoint:08x}")
+            continue
+        escaped.append(character)
+    return "".join(escaped)
+
+
+def _display_workspace(envelope: dict[str, Any]) -> str:
+    return str(Path(envelope["workspace"]))
+
+
+def _human_finding(finding: Any) -> str:
+    if isinstance(finding, str):
+        return _escape_human_value(finding)
+    if isinstance(finding, dict):
+        for public_field in ("id", "message"):
+            public_value = finding.get(public_field)
+            if isinstance(public_value, str) and public_value:
+                if public_field == "id":
+                    public_value = public_value.replace("-", " ")
+                return _escape_human_value(public_value)
+        return "Unidentified audit finding"
+    return "Unidentified audit finding"
+
+
+_INCOMPLETE_HUMAN_RESULT = (
+    "[ERROR] AEF returned an incomplete result\n\n"
+    "Some result details are unavailable.\n"
+)
+
+
+def _valid_human_envelope(envelope: Any) -> bool:
+    """Check only the common protocol shape needed by the renderer."""
+    try:
+        if not isinstance(envelope, dict):
+            return False
+        required = {"command", "status", "workspace", "result", "meta", "diff", "error"}
+        if not required.issubset(envelope):
+            return False
+        command = envelope["command"]
+        status = envelope["status"]
+        if command not in {
+            "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
+        } or not isinstance(status, str):
+            return False
+        allowed = {
+            "INIT": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "AUDIT": {"PASS", "FAIL", "FAILED", "ERROR"},
+            "DISCOVER": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "CONSOLIDATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "EVALUATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "INTEGRATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+        }
+        if status not in allowed[command]:
+            return False
+        if not isinstance(envelope["workspace"], str) or not envelope["workspace"]:
+            return False
+        if not isinstance(envelope["result"], dict) or not isinstance(envelope["meta"], dict):
+            return False
+        diff = envelope["diff"]
+        if diff is not None:
+            if not isinstance(diff, dict):
+                return False
+            if not all(
+                isinstance(diff.get(field), list)
+                for field in ("created", "modified", "removed")
+            ):
+                return False
+        error = envelope["error"]
+        if status == "ERROR":
+            if not isinstance(error, dict):
+                return False
+            if not isinstance(error.get("code"), str) or not isinstance(
+                error.get("message"), str
+            ):
+                return False
+        elif error is not None:
+            return False
+        if command == "AUDIT" and status in {"PASS", "FAIL"}:
+            if not isinstance(envelope["result"].get("findings"), list):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _render_human(envelope: dict[str, Any]) -> str:
+    """Render the common protocol envelope without reimplementing business logic."""
+    if not _valid_human_envelope(envelope):
+        return _INCOMPLETE_HUMAN_RESULT
+    try:
+        command = envelope["command"]
+        status = envelope["status"]
+        result = envelope["result"]
+        workspace = _escape_human_value(_display_workspace(envelope))
+
+        if status == "ERROR":
+            error = envelope["error"]
+            message = _escape_human_value(error["message"])
+            code = _escape_human_value(error["code"])
+            return f"[ERROR] {message}\n\nCode      : {code}\n"
+
+        if command == "INIT":
+            if status == "CHANGE":
+                created = len(envelope["diff"]["created"])
+                role = _escape_human_value(result.get("role") or "unknown")
+                framework_version = _escape_human_value(
+                    result.get("framework_version", "unknown")
+                )
+                created_text = _escape_human_value(created)
+                return (
+                    "[OK] AEF initialized\n\n"
+                    f"Role      : {role}\n"
+                    f"Version   : {framework_version}\n"
+                    f"Workspace : {workspace}\n"
+                    f"Files     : {created_text} created\n"
+                )
+            if status == "NO_CHANGE":
+                framework_version = _escape_human_value(
+                    result.get("framework_version", "unknown")
+                )
+                return (
+                    "[OK] AEF is already initialized\n\n"
+                    f"Version   : {framework_version}\n"
+                    f"Workspace : {workspace}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                unresolved = result.get("unresolved_decisions", [])
+                if isinstance(unresolved, list) and ROLE_DECISION in unresolved:
+                    return (
+                        "[BLOCKED] AEF initialization requires a primary role\n\n"
+                        "Run:\n"
+                        "aef init --role generalist-agent\n"
+                    )
+                reason = envelope["meta"].get("reason", "blocked")
+                readable = _escape_human_value(reason).replace("_", " ")
+                return (
+                    "[BLOCKED] AEF initialization blocked\n\n"
+                    f"Reason    : {readable}\n"
+                    f"Workspace : {workspace}\n"
+                )
+
+        if command == "AUDIT":
+            findings = result["findings"]
+            if status == "PASS":
+                return (
+                    "[OK] AEF audit passed\n\n"
+                    f"Workspace : {workspace}\n"
+                    "Findings  : none\n"
+                )
+            if status == "FAIL":
+                lines = "\n".join(f"- {_human_finding(item)}" for item in findings)
+                return f"[FAILED] AEF audit found problems\n\n{lines}\n"
+
+        if command == "DISCOVER":
+            connectors = _escape_human_value(result.get("connectors", "unknown"))
+            capabilities = _escape_human_value(
+                result.get("capabilities", "unknown")
+            )
+            if status == "CHANGE":
+                heading = (
+                    "[OK] Connector discovery would update the registry"
+                    if envelope.get("dry_run") is True
+                    else "[OK] Connector discovery updated the registry"
+                )
+                return (
+                    f"{heading}\n\n"
+                    f"Workspace   : {workspace}\n"
+                    f"Connectors  : {connectors}\n"
+                    f"Capabilities: {capabilities}\n"
+                    "Authority   : unchanged\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] Connector discovery found no changes\n\n"
+                    f"Workspace   : {workspace}\n"
+                    f"Connectors  : {connectors}\n"
+                    f"Capabilities: {capabilities}\n"
+                    "Authority   : unchanged\n"
+                    "Changes     : none\n"
+                )
+            if status == "BLOCKED":
+                return (
+                    "[BLOCKED] Connector discovery requires an initialized AEF workspace\n\n"
+                    f"Workspace : {workspace}\n"
+                )
+
+        if command == "CONSOLIDATE":
+            reviews = _escape_human_value(result.get("reviews", "unknown"))
+            changed = _escape_human_value(len(result.get("rules_changed", [])))
+            if status == "CHANGE":
+                heading = (
+                    "[OK] AEF knowledge would be consolidated"
+                    if envelope.get("dry_run") is True
+                    else "[OK] AEF knowledge consolidated"
+                )
+                suffix = " would change" if envelope.get("dry_run") is True else " changed"
+                return (
+                    f"{heading}\n\nWorkspace : {workspace}\nReviews   : {reviews}\n"
+                    f"Rules     : {changed}{suffix}\nAuthority : unchanged\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF knowledge needs no consolidation\n\n"
+                    f"Workspace : {workspace}\nReviews   : {reviews}\n"
+                    "Changes   : none\nAuthority : unchanged\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF knowledge consolidation is blocked\n\n"
+                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}\n"
+                )
+
+        if command == "EVALUATE":
+            pending = _escape_human_value(result.get("pending_recommendations", 0))
+            if status == "CHANGE":
+                if result.get("recovery_action"):
+                    action = _escape_human_value(result["recovery_action"])
+                    heading = (
+                        "[OK] AEF evaluation recovery would be applied"
+                        if envelope.get("dry_run") is True
+                        else "[OK] AEF evaluation recovery completed"
+                    )
+                    return f"{heading}\n\nWorkspace : {workspace}\nAction    : {action}\n"
+                heading = (
+                    "[OK] AEF evaluation would be applied"
+                    if envelope.get("dry_run") is True
+                    else "[OK] AEF evaluation completed"
+                )
+                approved = _escape_human_value(len(result.get("approved", [])))
+                rejected = _escape_human_value(len(result.get("rejected", [])))
+                levels = _escape_human_value(len(result.get("levels_changed", [])))
+                return (
+                    f"{heading}\n\nApproved : {approved}\nRejected : {rejected}\n"
+                    f"Levels   : {levels} changed\nPending  : {pending}\n"
+                )
+            if status == "NO_CHANGE":
+                recommendations = result.get("recommendations")
+                if isinstance(recommendations, list):
+                    if not recommendations:
+                        return (
+                            "[OK] No promotion recommendations require review\n\n"
+                            f"Workspace : {workspace}\nPending   : none\n"
+                        )
+                    lines = []
+                    for item in recommendations:
+                        scope = item.get("scope")
+                        label = "Career" if scope == "career" else (
+                            "Competency " + _escape_human_value(item.get("competency_id", "unknown"))
+                        )
+                        levels = (
+                            _escape_human_value(item.get("from_level", "unknown"))
+                            + " -> " + _escape_human_value(item.get("to_level", "unknown"))
+                        )
+                        stale = " [stale]" if item.get("stale") is True else ""
+                        lines.append(f"- {label}: {levels}{stale}")
+                    recovery = (
+                        "\nRecovery : required" if envelope["meta"].get("recovery_required") else ""
+                    )
+                    return (
+                        "[OK] Promotion recommendations require review\n\n"
+                        f"Workspace : {workspace}\nPending   : {pending}\n\n"
+                        + "\n".join(lines) + recovery + "\n"
+                    )
+                return (
+                    "[OK] AEF evaluation needs no changes\n\n"
+                    f"Workspace : {workspace}\nChanges   : none\nPending   : {pending}\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF evaluation cannot proceed\n\n"
+                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}\n"
+                )
+
+        if command == "INTEGRATE":
+            scope = _escape_human_value(result.get("scope", "project"))
+            doctrine = _escape_human_value(result.get("doctrine_files", 0))
+            enforcement = _escape_human_value(
+                result.get("enforcement", "guidance_only")
+            ).replace("_", " ")
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] Claude integration cannot be updated safely\n\n"
+                    f"Reason    : {reason.replace('_', ' ')}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if result.get("status_only") is True:
+                warnings = result.get("warnings", [])
+                warning_text = (
+                    "none" if not warnings else ", ".join(
+                        _escape_human_value(item) for item in warnings
+                    )
+                )
+                if not result.get("installed"):
+                    return (
+                        "[OK] Claude project integration is not installed\n\n"
+                        f"Workspace : {workspace}\nWarnings  : {warning_text}\n"
+                    )
+                audit = _escape_human_value(result.get("audit", "unknown"))
+                reviews = _escape_human_value(result.get("pending_reviews", "unknown"))
+                return (
+                    "[OK] Claude project integration is healthy\n\n"
+                    f"Doctrine : loaded\nAudit    : {audit}\n"
+                    f"Reviews  : {reviews} pending\nWarnings : {warning_text}\n"
+                )
+            action = result.get("action")
+            if status == "CHANGE":
+                if action == "remove":
+                    heading = (
+                        "[OK] Claude integration would be removed"
+                        if envelope.get("dry_run") else
+                        "[OK] Claude integration removed"
+                    )
+                else:
+                    heading = (
+                        "[OK] Claude integration would be installed"
+                        if envelope.get("dry_run") else
+                        "[OK] Claude integration installed"
+                    )
+                return (
+                    f"{heading}\n\nScope       : {scope}\n"
+                    f"Doctrine    : {doctrine} files linked\n"
+                    f"Workspace   : {workspace}\nEnforcement : {enforcement}\n"
+                )
+            if action == "remove":
+                return (
+                    "[OK] Claude integration is not installed\n\nChanges : none\n"
+                )
+            return (
+                "[OK] Claude integration is already installed\n\nChanges : none\n"
+            )
+
+        marker = "FAILED" if status == "FAILED" else "ERROR"
+        safe_status = _escape_human_value(status)
+        return f"[{marker}] AEF command ended with status {safe_status}\n"
+    except Exception:
+        return _INCOMPLETE_HUMAN_RESULT
+
+
+def _write_stderr(message: str) -> None:
+    """Best-effort ASCII diagnostic that must never escape the CLI boundary."""
+    try:
+        sys.stderr.write(message.encode("ascii", "replace").decode("ascii"))
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def _exit_code(command: str, status: str) -> int:
+    if status in {"CHANGE", "NO_CHANGE", "PASS"}:
+        return 0
+    if command == "AUDIT" and status == "FAIL":
+        return 1
+    if status == "BLOCKED":
+        return 4
+    # Reserved for a business operation returning FAILED. Neither INIT nor
+    # AUDIT currently has such a reachable result; do not synthesize one.
+    if status == "FAILED":
+        return 5
+    return 70
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="aef",
+        description="Manage project-local Agent Evolution Framework state.",
+        epilog="Automation should pass --json explicitly. Run 'aef COMMAND --help' for details.",
+    )
+    parser.add_argument(
+        "--workspace", default=".", metavar="PATH",
+        help="project workspace root (default: current directory)",
+    )
+    parser.add_argument(
+        "--compact", action="store_true",
+        help="emit compact JSON (implies --json; incompatible with --human)",
+    )
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="force JSON output")
+    output.add_argument("--human", action="store_true", help="force human-readable output")
+    parser.add_argument("--verbose", action="store_true", help="emit filtered diagnostics on stderr")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_distribution_version()}")
+
+    commands = parser.add_subparsers(dest="command", required=True)
+    init_parser = commands.add_parser(
+        "init", help="initialize an AEF V1 workspace",
+        description="Initialize the official AEF V1 profile in one project.",
+    )
+    init_parser.add_argument("--instance-id", metavar="ID", help="explicit stable workspace identity")
+    init_parser.add_argument("--role", metavar="ROLE", help="required primary agent role")
+    init_parser.add_argument("--created-at", metavar="RFC3339", help="explicit creation timestamp")
+    init_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
+    commands.add_parser(
+        "audit", help="audit an AEF workspace",
+        description="Validate required persisted AEF state without modifying it.",
+    )
+    discover_parser = commands.add_parser(
+        "discover", help="reconcile an explicit connector snapshot",
+        description="Reconcile a strict-JSON connector snapshot without granting authority.",
+    )
+    discover_parser.add_argument("--snapshot", required=True, metavar="FILE", help="connector snapshot document")
+    discover_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
+    consolidate_parser = commands.add_parser(
+        "consolidate", help="apply explicit rule lifecycle reviews",
+        description="Review existing knowledge-rule lifecycles using an explicit JSON document.",
+    )
+    consolidate_parser.add_argument("--reviews", required=True, metavar="FILE", help="consolidation review document")
+    consolidate_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
+    evaluate_parser = commands.add_parser(
+        "evaluate", help="review pending promotion recommendations",
+        description="List recommendations, apply explicit human decisions, or recover a transaction.",
+    )
+    evaluation_action = evaluate_parser.add_mutually_exclusive_group()
+    evaluation_action.add_argument("--list", action="store_true", dest="list_only", help="list pending recommendations without writing")
+    evaluation_action.add_argument("--decisions", metavar="FILE", help="explicit human decision document")
+    evaluation_action.add_argument("--refresh", action="store_true", help="refresh recommendation state")
+    evaluation_action.add_argument("--recover", action="store_true", help="recover an interrupted EVALUATE transaction")
+    evaluate_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
+    integrate_parser = commands.add_parser(
+        "integrate", help="manage project-local integrations",
+        description="Manage guidance integrations confined to this project.",
+    )
+    integrations = integrate_parser.add_subparsers(
+        dest="integration", required=True
+    )
+    claude_parser = integrations.add_parser(
+        "claude", help="manage the Claude project guidance bridge",
+        description="Install, inspect, or remove the project-local Claude guidance bridge.",
+    )
+    claude_parser.add_argument(
+        "--scope", default="project", metavar="project",
+        help="integration scope (V1 supports project only; default: project)",
+    )
+    claude_action = claude_parser.add_mutually_exclusive_group()
+    claude_action.add_argument("--status", action="store_true", dest="status_only", help="inspect status without writing")
+    claude_action.add_argument("--remove", action="store_true", help="remove only the managed AEF segment")
+    claude_parser.add_argument("--dry-run", action="store_true", help="render the exact bridge change without writing")
+    return parser
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.compact and args.human:
+        parser.error("argument --compact: not allowed with argument --human")
+    if args.command == "integrate" and args.status_only and args.dry_run:
+        parser.error("argument --dry-run: not allowed with argument --status")
+    return args
+
+
+def _output_mode(args: argparse.Namespace) -> str:
+    if args.human:
+        return "human"
+    if args.json or args.compact:
+        return "json"
+    return "human" if getattr(sys.stdout, "isatty", lambda: False)() else "json"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _validate_timestamp(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CLIInputError("invalid_timestamp", "Creation timestamp must be valid RFC 3339.")
+    try:
+        if "T" not in value:
+            raise ValueError
+        parsed = value[:-1] + "+00:00" if value.endswith("Z") else value
+        timestamp = datetime.fromisoformat(parsed)
+        if timestamp.tzinfo is None:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise CLIInputError(
+            "invalid_timestamp", "Creation timestamp must be valid RFC 3339."
+        ) from exc
+    return value
+
+
+def _validate_json_documents(workspace: Path) -> None:
+    agent_dir = workspace / ".agent"
+    if not agent_dir.exists():
+        return
+    for path in sorted(agent_dir.rglob("*.json")):
+        if path.is_file():
+            json.loads(path.read_text(encoding="utf-8"))
+
+
+def _existing_role(current: dict[str, Any]) -> str | None:
+    for decision in current.get("decisions", {}).get("decisions", []):
+        if decision.get("id") == ROLE_DECISION and decision.get("status") == "resolved":
+            value = decision.get("value")
+            return value if isinstance(value, str) else None
+    return None
+
+
+def _prompt_role() -> str | None:
+    if not sys.stdin.isatty():
+        return None
+    _write_stderr("Primary role [generalist-agent]: ")
+    response = sys.stdin.readline()
+    if response == "":
+        return None
+    return response.strip() or "generalist-agent"
+
+
+def _init_result(state: dict[str, Any], instance_id: str, meta: dict[str, Any]) -> dict[str, Any]:
+    manifest = state.get("files", {}).get(".agent/manifest.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    return {
+        "instance_id": manifest.get("instance_id", instance_id),
+        "framework_version": manifest.get("framework_version", "1.0.0"),
+        "schema_version": manifest.get("schema_version", "1.0.0"),
+        "role": _existing_role(state),
+        "unresolved_decisions": meta.get("unresolved_decisions", []),
+    }
+
+
+def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    current = load_workspace(workspace)
+    decisions_path = ".agent/state/decisions.json"
+    if decisions_path in current.get("files", {}):
+        validate_decisions_document(current["files"][decisions_path])
+    manifest = current.get("files", {}).get(".agent/manifest.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+
+    if args.instance_id is not None and not args.instance_id.strip():
+        raise CLIInputError("invalid_instance_id", "Instance ID must be a non-empty string.")
+
+    if args.dry_run and not manifest:
+        missing = [
+            name
+            for name, value in (("instance_id", args.instance_id), ("created_at", args.created_at))
+            if value is None or (name == "created_at" and not value.strip())
+        ]
+        if missing:
+            raise CLIInputError(
+                "dry_run_requires_stable_inputs",
+                "A new workspace dry-run requires explicit instance ID and creation timestamp.",
+                {"missing": missing},
+            )
+
+    if args.created_at is not None and not args.created_at.strip():
+        raise CLIInputError("invalid_timestamp", "Creation timestamp must be valid RFC 3339.")
+
+    instance_id = (
+        args.instance_id if args.instance_id is not None
+        else manifest.get("instance_id") or str(uuid.uuid4())
+    )
+    created_at = _validate_timestamp(
+        args.created_at if args.created_at is not None
+        else manifest.get("created_at") or _utc_now()
+    )
+    role = args.role
+    if role is None and _existing_role(current) is None:
+        role = _prompt_role()
+    answers = {ROLE_DECISION: role} if role is not None else {}
+
+    status, desired, meta = init_project(
+        current,
+        instance_id=instance_id,
+        answers=answers,
+        created_at=created_at,
+        profile="aef-v1",
+    )
+    diff = plan_workspace(current, desired)
+    if not args.dry_run and status in {"CHANGE", "NO_CHANGE"}:
+        diff = apply_workspace(workspace, current, desired)
+    envelope = _envelope(
+        command="INIT",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=_init_result(desired, instance_id, meta),
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("INIT", status)
+
+
+def _run_audit(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    result = audit_project(load_workspace(workspace))
+    status = result["status"]
+    envelope = _envelope(
+        command="AUDIT",
+        workspace=workspace,
+        status=status,
+        ok=status == "PASS",
+        dry_run=False,
+        result={"schema_version": result["schema_version"], "findings": result["findings"]},
+        meta={},
+        diff=None,
+    )
+    return envelope, _exit_code("AUDIT", status)
+
+
+def _load_snapshot(path: str | Path) -> Any:
+    raw = Path(path).read_text(encoding="utf-8")
+
+    def reject_constant(value):
+        raise json.JSONDecodeError(f"invalid JSON constant: {value}", raw, 0)
+
+    return json.loads(raw, parse_constant=reject_constant)
+
+
+def _read_interactive_value(prompt: str) -> str | None:
+    _write_stderr(prompt)
+    value = sys.stdin.readline()
+    if value == "":
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _interactive_decision_id(recommendation_id, decision, actor, timestamp):
+    payload = json.dumps(
+        [recommendation_id, decision, actor, timestamp],
+        ensure_ascii=True, separators=(",", ":"),
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"evaluation:interactive:sha256-{digest}"
+
+
+def _collect_interactive_decisions(recommendations):
+    decisions = []
+    total = len(recommendations)
+    for index, item in enumerate(recommendations, start=1):
+        evidence = item.get("current_evidence") or {}
+        scope = "career" if item.get("scope") == "career" else "competency"
+        competency = (
+            "" if scope == "career"
+            else f"\nCompetency    : {_escape_human_value(item.get('competency_id', 'unknown'))}"
+        )
+        reasons = ", ".join(item.get("readiness", {}).get("reasons", [])) or "none"
+        summary = (
+            f"\nPromotion recommendation {index} of {total}\n\n"
+            f"Scope         : {scope}{competency}\n"
+            f"Current level : {_escape_human_value(item.get('current_level', 'unknown'))}\n"
+            f"Proposed level: {_escape_human_value(item.get('to_level', 'unknown'))}\n"
+            f"XP            : {_escape_human_value(evidence.get('xp', 'unknown'))}\n"
+            f"Cases         : {_escape_human_value(evidence.get('cases', 'unknown'))}\n"
+            f"Trust         : {_escape_human_value(evidence.get('trust', 'unknown'))}\n"
+            f"Complex cases : {_escape_human_value(evidence.get('complex_cases', 'unknown'))}\n"
+            f"Recent errors : {_escape_human_value(evidence.get('recent_significant_errors', 'unknown'))}\n"
+            f"Probation     : {_escape_human_value(item.get('probation', 'unknown'))}\n"
+            f"Readiness     : {_escape_human_value(reasons)}\n\n"
+        )
+        _write_stderr(summary)
+        choice = _read_interactive_value("Approve / Reject / Later [a/r/l]: ")
+        if choice is None or choice.lower() not in {"a", "approve", "r", "reject"}:
+            continue
+        decision = "approve" if choice.lower() in {"a", "approve"} else "reject"
+        actor = _read_interactive_value("Actor: ")
+        if actor is None:
+            continue
+        reason = _read_interactive_value("Reason: ")
+        if reason is None:
+            continue
+        confirmation = _read_interactive_value(
+            f"Confirm {decision} [y/N]: "
+        )
+        if confirmation is None or confirmation.lower() not in {"y", "yes"}:
+            continue
+        timestamp = _utc_now()
+        entry = {
+            "id": _interactive_decision_id(
+                item["id"], decision, actor, timestamp
+            ),
+            "recommendation_id": item["id"],
+            "decision": decision,
+            "reason": reason,
+            "expected_evidence_digest": item["evidence_digest"],
+        }
+        if decision == "approve":
+            entry["expected_current_evidence_digest"] = item[
+                "current_evidence_digest"
+            ]
+            entry["approval"] = {
+                "approved": True, "source": "human", "actor": actor,
+                "approved_at": timestamp,
+            }
+        else:
+            entry["rejection"] = {
+                "rejected": True, "source": "human", "actor": actor,
+                "rejected_at": timestamp,
+            }
+        decisions.append(entry)
+    return {"protocol": "aef.evaluate/v1", "decisions": decisions}
+
+
+def _run_discover(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    current = load_workspace(workspace)
+    snapshot = _load_snapshot(args.snapshot)
+    status, desired, meta = discover_project(current, snapshot)
+    diff = plan_workspace(current, desired)
+    if not args.dry_run and status in {"CHANGE", "NO_CHANGE"}:
+        diff = apply_workspace(workspace, current, desired)
+    result = {
+        "registry_path": meta.get("registry_path", ".agent/integrations/registry.json"),
+        "connectors": meta.get("connector_count", 0),
+        "available_connectors": meta.get("available_connector_count", 0),
+        "capabilities": meta.get("capability_count", 0),
+        "authority_granted": False,
+    }
+    envelope = _envelope(
+        command="DISCOVER",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("DISCOVER", status)
+
+
+def _run_consolidate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    current = load_workspace(workspace)
+    reviews = _load_snapshot(args.reviews)
+    status, desired, meta = consolidate_project(current, reviews)
+    diff = plan_workspace(current, desired)
+    if not args.dry_run and status in {"CHANGE", "NO_CHANGE"}:
+        diff = apply_workspace(workspace, current, desired)
+    result = {
+        "knowledge_path": ".agent/knowledge/knowledge.json",
+        "reviews": meta.get("review_count", len(reviews.get("reviews", [])) if isinstance(reviews, dict) else 0),
+        "decisions": meta.get("decisions", []),
+        "rules_changed": meta.get("changed_rule_ids", []),
+        "authority_granted": False,
+    }
+    envelope = _envelope(
+        command="CONSOLIDATE", workspace=workspace, status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"}, dry_run=args.dry_run,
+        result=result, meta=meta, diff=diff,
+    )
+    return envelope, _exit_code("CONSOLIDATE", status)
+
+
+def _evaluation_result(meta: dict[str, Any]) -> dict[str, Any]:
+    decisions = meta.get("decisions", [])
+    return {
+        "recommendations": meta.get("recommendations"),
+        "pending_recommendations": meta.get(
+            "pending_recommendations", len(meta.get("recommendations", []))
+        ),
+        "decisions_processed": len(decisions),
+        "approved": [
+            item["recommendation_id"] for item in decisions
+            if item.get("decision") == "APPROVE"
+        ],
+        "rejected": [
+            item["recommendation_id"] for item in decisions
+            if item.get("decision") == "REJECT"
+        ],
+        "levels_changed": meta.get("levels_changed", []),
+        "refreshed": meta.get("refreshed", []),
+        "recovery_action": meta.get("action") if meta.get("action") != "none" else None,
+    }
+
+
+def _run_evaluate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    current = load_workspace(workspace)
+    if args.list_only:
+        if args.dry_run:
+            raise CLIInputError("invalid_input", "Evaluation listing does not use dry-run.")
+        status, desired, meta = list_project_recommendations(current)
+        diff = {"created": [], "modified": [], "removed": []}
+    elif args.recover:
+        status, desired, meta = recover_evaluation_transaction(
+            workspace, current, dry_run=args.dry_run
+        )
+        diff = plan_workspace(current, desired)
+    elif args.refresh:
+        status, desired, meta = refresh_project_recommendations(current)
+        diff = plan_workspace(current, desired)
+        if not args.dry_run and status in {"CHANGE", "NO_CHANGE"}:
+            diff = apply_workspace(workspace, current, desired)
+    elif args.decisions:
+        decisions = _load_snapshot(args.decisions)
+        status, desired, meta = evaluate_project(current, decisions)
+        diff = plan_workspace(current, desired)
+        if status in {"CHANGE", "NO_CHANGE"}:
+            diff, _ = apply_evaluation_transaction(
+                workspace, current, desired, decisions, dry_run=args.dry_run
+            )
+    else:
+        if (
+            args.dry_run
+            or _output_mode(args) != "human"
+            or not sys.stdin.isatty()
+            or not sys.stdout.isatty()
+        ):
+            raise CLIInputError(
+                "interactive_input_required",
+                "Interactive evaluation requires a terminal.",
+            )
+        list_status, _, list_meta = list_project_recommendations(current)
+        if list_status == "BLOCKED":
+            status, desired, meta = list_status, current, list_meta
+            diff = {"created": [], "modified": [], "removed": []}
+        else:
+            decisions = _collect_interactive_decisions(list_meta["recommendations"])
+            status, desired, meta = evaluate_project(current, decisions)
+            diff = plan_workspace(current, desired)
+            if status in {"CHANGE", "NO_CHANGE"}:
+                diff, _ = apply_evaluation_transaction(
+                    workspace, current, desired, decisions, dry_run=False
+                )
+    result = _evaluation_result(meta)
+    envelope = _envelope(
+        command="EVALUATE", workspace=workspace, status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"}, dry_run=args.dry_run,
+        result=result, meta=meta, diff=diff,
+    )
+    return envelope, _exit_code("EVALUATE", status)
+
+
+def _claude_settings_warnings(workspace: Path) -> list[str]:
+    warnings = []
+    for name in ("settings.json", "settings.local.json"):
+        path = workspace / ".claude" / name
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            warnings.append(f"unmanaged_{name.replace('.', '_')}_invalid")
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            warnings.append(f"unmanaged_{name.replace('.', '_')}_invalid")
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+            json.loads(
+                raw,
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError("non-standard JSON constant")
+                ),
+            )
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+            warnings.append(f"unmanaged_{name.replace('.', '_')}_invalid")
+    return warnings
+
+
+def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if args.integration != "claude":
+        raise CLIInputError("unsupported_integration", "The integration is unsupported.")
+    if args.scope != "project":
+        raise CLIInputError(
+            "unsupported_integration_scope",
+            "Only project-scoped Claude integration is supported.",
+            {"scope": args.scope},
+        )
+    workspace = Path(args.workspace).resolve()
+    _validate_json_documents(workspace)
+    current = load_workspace(workspace)
+    doctrine_error = None
+    if validate_claude_integration_workspace(current) is None:
+        try:
+            validate_claude_doctrine_files(workspace)
+        except ClaudeIntegrationFilesystemError:
+            doctrine_error = "missing_aef_doctrine"
+    try:
+        existing = read_claude_bridge(workspace)
+    except ClaudeIntegrationFilesystemError as exc:
+        raise CLIInputError(
+            "invalid_claude_instruction_file",
+            "The Claude project instruction file is invalid.",
+        ) from exc
+    status, desired, meta = plan_claude_integration(
+        current, existing, remove=args.remove, status_only=args.status_only
+    )
+    if doctrine_error is not None:
+        status = "BLOCKED"
+        meta = {
+            **meta, "reason": doctrine_error, "doctrine_files": 0,
+            "bridge_healthy": False, "workspace_compatible": False,
+        }
+    warnings = _claude_settings_warnings(workspace) if args.status_only else []
+    audit = audit_project(current) if args.status_only else None
+    pending = None
+    if args.status_only:
+        try:
+            _, _, pending_meta = list_project_recommendations(current)
+            pending = len(pending_meta.get("recommendations", []))
+        except ValueError:
+            warnings.append("aef_evaluation_status_unavailable")
+    desired_bytes = meta.get("desired_bytes", existing)
+    diff = claude_bridge_diff(existing, desired_bytes) if status == "CHANGE" else {
+        "created": [], "modified": [], "removed": [],
+    }
+    if status == "CHANGE" and not args.dry_run:
+        diff = apply_claude_bridge(workspace, existing, desired_bytes)
+    result = {
+        "scope": "project",
+        "action": "remove" if args.remove else "install",
+        "status_only": args.status_only,
+        "installed": (
+            False if args.remove and status == "CHANGE" else
+            True if not args.remove and status == "CHANGE" else
+            meta.get("bridge", {}).get("state") == "installed"
+        ),
+        "bridge_healthy": meta.get("bridge_healthy", status != "BLOCKED"),
+        "workspace_compatible": meta.get("workspace_compatible", status != "BLOCKED"),
+        "doctrine_files": meta.get("doctrine_files", 0),
+        "enforcement": "guidance_only",
+        "audit": audit.get("status", "unknown").lower() if audit else None,
+        "pending_reviews": pending,
+        "warnings": warnings,
+    }
+    envelope = _envelope(
+        command="INTEGRATE", workspace=workspace, status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"}, dry_run=args.dry_run,
+        result=result, meta={key: value for key, value in meta.items()
+                             if key != "desired_bytes"}, diff=diff,
+    )
+    return envelope, _exit_code("INTEGRATE", status)
+
+
+def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if args.command == "init":
+        return _run_init(args)
+    if args.command == "audit":
+        return _run_audit(args)
+    if args.command == "discover":
+        return _run_discover(args)
+    if args.command == "consolidate":
+        return _run_consolidate(args)
+    if args.command == "integrate":
+        return _run_integrate(args)
+    return _run_evaluate(args)
+
+
+def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str, Any], int]:
+    if isinstance(exc, CLIInputError):
+        code = exc.code
+        message = exc.public_message
+        details = exc.details
+        exit_code = 3
+    elif isinstance(exc, InvalidDecisionsDocumentError):
+        code = "invalid_decisions_document"
+        message = "The decisions document is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidDiscoveryRegistryError):
+        code = "invalid_discovery_registry"
+        message = "The persisted connector registry is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidDiscoverySnapshotError):
+        code = "invalid_discovery_snapshot"
+        message = "The connector discovery snapshot is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidConsolidationInputError):
+        code = "invalid_consolidation_input"
+        message = "The consolidation review document is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidKnowledgeStateError):
+        code = "invalid_knowledge_state"
+        message = "The persisted knowledge state is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidEvaluationDecisionsError):
+        code = "invalid_evaluation_decisions"
+        message = "The evaluation decisions document is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidPromotionRecommendationStateError):
+        code = "invalid_evaluation_state"
+        message = "The persisted evaluation state is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidCareerStateError):
+        code = "invalid_career_state"
+        message = "The persisted career state is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidCompetencyStateError):
+        code = "invalid_competency_state"
+        message = "The persisted competency state is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidEvaluationTransactionError):
+        code = "invalid_evaluation_transaction"
+        message = "The persisted evaluation transaction is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, EvaluationRecoveryRequiredError):
+        code = "evaluation_recovery_required"
+        message = "Evaluation recovery is required before workspace mutation."
+        details = {}
+        exit_code = 4
+    elif isinstance(exc, ClaudeIntegrationFilesystemError):
+        code = "claude_integration_filesystem_error"
+        message = "The Claude project integration could not be written safely."
+        details = {}
+        exit_code = 6
+    elif isinstance(exc, (json.JSONDecodeError, UnicodeError)):
+        code = "invalid_json"
+        message = "A workspace JSON document is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, ValueError):
+        code = "invalid_input"
+        message = "The command input or configuration is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, OSError):
+        code = "filesystem_error"
+        message = "The workspace could not be accessed."
+        details = {}
+        exit_code = 6
+    else:
+        code = "internal_error"
+        message = "An unexpected internal error occurred."
+        details = {}
+        exit_code = 70
+    envelope = _envelope(
+        command=args.command.upper(),
+        workspace=args.workspace,
+        status="ERROR",
+        ok=False,
+        dry_run=bool(getattr(args, "dry_run", False)),
+        result={},
+        meta={},
+        diff=None,
+        error={"code": code, "message": message, "details": details},
+    )
+    return envelope, exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    try:
+        envelope, exit_code = _run_command(args)
+        if args.verbose:
+            if isinstance(envelope, dict):
+                command = _escape_human_value(envelope.get("command", "unknown"))
+                status = _escape_human_value(envelope.get("status", "unknown"))
+                _write_stderr(f"aef: {command} {status}\n")
+            else:
+                _write_stderr("aef: invalid internal result\n")
+    except Exception as exc:
+        envelope, exit_code = _error_envelope(args, exc)
+        error = envelope["error"]
+        if args.verbose:
+            _write_stderr(
+                f"aef: {error['code']} ({type(exc).__name__}): {error['message']}\n"
+            )
+        else:
+            _write_stderr(f"aef: {error['code']}: {error['message']}\n")
+    try:
+        if _output_mode(args) == "human":
+            rendered = _render_human(envelope)
+            if rendered == _INCOMPLETE_HUMAN_RESULT:
+                exit_code = 70
+            _write_stdout(rendered)
+        else:
+            _write_envelope(envelope, compact=args.compact)
+    except (BrokenPipeError, UnicodeError, OSError):
+        _write_stderr("aef: output_error: stdout is unavailable.\n")
+        return 6
+    except Exception:
+        _write_stderr("aef: internal_output_error.\n")
+        return 70
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

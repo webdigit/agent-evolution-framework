@@ -1,0 +1,22 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["applied"],
+  "properties": {
+    "applied": {
+      "type":"array",
+      "items": {
+        "type":"object",
+        "required":["id","from_version","to_version","status"],
+        "properties": {
+          "id":{"type":"string"},
+          "from_version":{"type":"string"},
+          "to_version":{"type":"string"},
+          "status":{"enum":["applied","failed","rolled_back"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

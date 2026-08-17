@@ -1,0 +1,55 @@
+# Python environments
+.venv/
+venv/
+env/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+.release-venv/
+.artifact-venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.tmp/
+tmp/
+temp/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local AEF pilot workspaces and generated agent state
+.agent/
+pilot-workspace/
+pilot-workspace-*/

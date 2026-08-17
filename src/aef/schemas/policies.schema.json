@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["hard_policies"],
+  "properties": {
+    "hard_policies": {
+      "type":"array",
+      "items": {
+        "type":"object",
+        "required":["id","effect"],
+        "properties": {
+          "id":{"type":"string"},
+          "effect":{"enum":["deny","require_approval","escalate"]},
+          "scope":{"type":"string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

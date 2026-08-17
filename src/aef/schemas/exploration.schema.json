@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/exploration.schema.json",
+  "title": "AEF Exploration Policy",
+  "type": "object",
+  "required": ["mode", "max_risk", "require_hypothesis"],
+  "properties": {
+    "mode": {"enum": ["OBSERVE", "SHADOW", "SIMULATE", "LIVE"]},
+    "max_risk": {"enum": ["R0", "R1", "R2", "R3", "R4"]},
+    "require_hypothesis": {"type": "boolean"},
+    "require_reversibility_for_live": {"type": "boolean"},
+    "budget": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+  },
+  "additionalProperties": true
+}

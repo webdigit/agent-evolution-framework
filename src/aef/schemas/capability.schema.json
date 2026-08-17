@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/capability.schema.json",
+  "title": "AEF Capability Registry",
+  "type": "object",
+  "required": ["connectors"],
+  "properties": {
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "capabilities"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["available", "unavailable", "deprecated", "unknown", "restricted"]},
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "operation", "risk", "reversible"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "operation": {"type": "string", "minLength": 1},
+                "risk": {"enum": ["R0", "R1", "R2", "R3", "R4"]},
+                "reversible": {"type": "boolean"}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

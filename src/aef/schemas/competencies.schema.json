@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/competencies.schema.json",
+  "title": "AEF Competencies",
+  "description": "Canonical competency state is an object keyed by competency ID. The legacy list envelope remains readable for compatibility.",
+  "oneOf": [
+    {"$ref": "#/$defs/canonicalCompetencies"},
+    {"$ref": "#/$defs/legacyCompetencies"}
+  ],
+  "$defs": {
+    "canonicalCompetencies": {
+      "type": "object",
+      "propertyNames": {"type": "string", "minLength": 1},
+      "additionalProperties": {"$ref": "#/$defs/competency"}
+    },
+    "legacyCompetencies": {
+      "type": "object",
+      "required": ["competencies"],
+      "properties": {
+        "competencies": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/competency"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "competency": {
+      "type": "object",
+      "required": ["level", "xp", "trust"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "level": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
+        "xp": {"type": "integer", "minimum": 0},
+        "trust": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "cases": {"type": "integer", "minimum": 0},
+        "complex_cases": {"type": "integer", "minimum": 0},
+        "recent_significant_errors": {"type": "integer", "minimum": 0},
+        "probation": {"type": "boolean"},
+        "source": {"type": "string", "minLength": 1},
+        "difficulty_exposure": {
+          "type": "object",
+          "properties": {
+            "D1": {"type": "integer", "minimum": 0},
+            "D2": {"type": "integer", "minimum": 0},
+            "D3": {"type": "integer", "minimum": 0},
+            "D4": {"type": "integer", "minimum": 0},
+            "D5": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "exploration_authority": {"enum": ["NONE", "OBSERVE", "SHADOW", "SIMULATE", "LIVE"]}
+      },
+      "additionalProperties": true
+    }
+  }
+}

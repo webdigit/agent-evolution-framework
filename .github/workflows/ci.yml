@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Check whitespace
+        run: python scripts/check_release_whitespace.py
+      - name: Install package and tests
+        run: python -m pip install . -r requirements.txt
+      - name: Run complete suite
+        run: python -m pytest -q
+
+  artifacts:
+    name: Build and install release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install build verification tools
+        run: python -m pip install build twine check-wheel-contents
+      - name: Build wheel and sdist
+        run: python -m build
+      - name: Check package metadata
+        run: python -m twine check dist/*
+      - name: Check wheel structure
+        run: check-wheel-contents dist/*.whl
+      - name: Verify packaged schemas and exclusions
+        run: python scripts/verify_artifacts.py dist/*.whl dist/*.tar.gz
+      - name: Install wheel outside the checkout
+        shell: bash
+        run: |
+          smoke_root="$(mktemp -d)"
+          python -m venv "$smoke_root/venv"
+          "$smoke_root/venv/bin/python" -m pip install dist/*.whl
+          cd "$smoke_root"
+          "$smoke_root/venv/bin/aef" --version
+          "$smoke_root/venv/bin/aef" --help
+          "$smoke_root/venv/bin/python" -m aef --version
+          "$smoke_root/venv/bin/python" -c "from aef.schema_validation import load_packaged_schema; load_packaged_schema('knowledge.schema.json')"
+          "$smoke_root/venv/bin/aef" --human --workspace "$smoke_root/project" init --role generalist-agent
+          "$smoke_root/venv/bin/aef" --human --workspace "$smoke_root/project" audit
+      - name: Build wheel from sdist
+        shell: bash
+        run: |
+          sdist_root="$(mktemp -d)"
+          python -m pip wheel --no-deps --wheel-dir "$sdist_root" dist/*.tar.gz
+          python scripts/verify_artifacts.py "$sdist_root"/*.whl

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/supervision.schema.json",
+  "title": "AEF Supervision Policy",
+  "type": "object",
+  "required": ["mode"],
+  "properties": {
+    "mode": {"enum": ["after_each_task", "task_count", "duration", "event", "adaptive"]},
+    "interval": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "string", "minLength": 1}]},
+    "user_configured": {"type": "boolean"}
+  },
+  "allOf": [
+    {"if": {"properties": {"mode": {"const": "task_count"}}}, "then": {"required": ["interval"]}},
+    {"if": {"properties": {"mode": {"const": "duration"}}}, "then": {"required": ["interval"]}}
+  ],
+  "additionalProperties": true
+}

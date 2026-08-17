@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["policy","history"],
+  "properties": {
+    "schema_version": {"const":"1.0.0"},
+    "policy": {
+      "type":"object",
+      "required":["mode"],
+      "properties": {
+        "mode":{"enum":["task_count","interval","manual","adaptive"]},
+        "every_tasks":{"type":["integer","null"],"minimum":1},
+        "interval_days":{"type":["integer","null"],"minimum":1}
+      },
+      "additionalProperties": false
+    },
+    "history": {
+      "type":"array",
+      "items": {
+        "type":"object",
+        "required":["id","performed_at","result"],
+        "properties": {
+          "id":{"type":"string","minLength":1},
+          "performed_at":{"type":"string","format":"date-time","pattern":"^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"},
+          "result":{"enum":["maintain","promote","probation","demote","adjust_supervision"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "promotion_recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "scope", "competency_id", "from_level", "to_level", "status", "detected_at", "evidence", "evidence_digest"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "pattern": "^promotion:(career:global|competency:sha256-[0-9a-f]{64}):L[1-5]:L[1-5](?::evidence-[0-9a-f]{64})?$"},
+          "type": {"const": "promotion"},
+          "scope": {"enum": ["career", "competency"]},
+          "competency_id": {"type": ["string", "null"], "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f-\\u009f]).+$"},
+          "from_level": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
+          "to_level": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
+          "status": {"enum": ["pending", "approved", "rejected", "withdrawn", "superseded"]},
+          "detected_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"},
+          "evidence": {
+            "type": "object",
+            "required": ["xp", "cases", "trust", "complex_cases", "recent_significant_errors"],
+            "properties": {
+              "xp": {"type": "number", "minimum": 0},
+              "cases": {"type": "integer", "minimum": 0},
+              "trust": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "complex_cases": {"type": "integer", "minimum": 0},
+              "recent_significant_errors": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          },
+          "evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {"properties": {"scope": {"const": "career"}}},
+            "then": {"properties": {"competency_id": {"type": "null"}}}
+          },
+          {
+            "if": {"properties": {"scope": {"const": "competency"}}},
+            "then": {"properties": {"competency_id": {"type": "string", "minLength": 1, "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[\\u0000-\\u001f\\u007f-\\u009f]).+$"}}}
+          },
+          {
+            "if": {"properties": {"from_level": {"const": "L1"}}},
+            "then": {"properties": {"to_level": {"const": "L2"}}}
+          },
+          {
+            "if": {"properties": {"from_level": {"const": "L2"}}},
+            "then": {"properties": {"to_level": {"const": "L3"}}}
+          },
+          {
+            "if": {"properties": {"from_level": {"const": "L3"}}},
+            "then": {"properties": {"to_level": {"const": "L4"}}}
+          },
+          {
+            "if": {"properties": {"from_level": {"const": "L4"}}},
+            "then": {"properties": {"to_level": {"const": "L5"}}}
+          },
+          {
+            "if": {"properties": {"from_level": {"const": "L5"}}},
+            "then": false
+          }
+        ]
+      }
+    },
+    "promotion_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "recommendation_id", "decision", "reason", "source", "actor", "decided_at", "recommendation_evidence_digest", "current_evidence", "current_evidence_digest", "from_level", "to_level"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "recommendation_id": {"type": "string", "minLength": 1},
+          "decision": {"enum": ["approve", "reject"]},
+          "reason": {"type": "string", "minLength": 1},
+          "source": {"const": "human"},
+          "actor": {"type": "string", "minLength": 1},
+          "decided_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"},
+          "recommendation_evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "current_evidence": {
+            "type": "object",
+            "required": ["xp", "cases", "trust", "complex_cases", "recent_significant_errors"],
+            "properties": {
+              "xp": {"type": "number", "minimum": 0},
+              "cases": {"type": "integer", "minimum": 0},
+              "trust": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "complex_cases": {"type": "integer", "minimum": 0},
+              "recent_significant_errors": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          },
+          "current_evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "from_level": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
+          "to_level": {"enum": ["L1", "L2", "L3", "L4", "L5"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

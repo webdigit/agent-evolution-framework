@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/career.schema.json",
+  "title": "AEF Career State",
+  "type": "object",
+  "required": ["level", "xp", "trust", "status", "probation"],
+  "properties": {
+    "level": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
+    "xp": {"type": "integer", "minimum": 0},
+    "trust": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "status": {"enum": ["active", "paused", "retired"]},
+    "probation": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,23 @@
+{
+  "protocol": "aef.consolidate/v1",
+  "reviews": [
+    {
+      "action": "specialize",
+      "approval": {
+        "actor": "Alex Example",
+        "approved": true,
+        "approved_at": "2026-08-14T14:00:00Z",
+        "source": "human"
+      },
+      "context": {
+        "record_type": "ambiguous"
+      },
+      "evidence_ids": [
+        "observation:source-check"
+      ],
+      "id": "review:specialize:source-check",
+      "reason": "Apply the rule only to ambiguous records.",
+      "rule_id": "rule:source-check"
+    }
+  ]
+}

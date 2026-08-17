@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/manifest.schema.json",
+  "title": "AEF Manifest",
+  "type": "object",
+  "required": ["framework", "schema_version", "instance_id", "created_at"],
+  "properties": {
+    "framework": {"const": "aef"},
+    "schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "instance_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}
