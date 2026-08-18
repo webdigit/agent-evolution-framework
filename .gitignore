@@ -53,3 +53,8 @@ Desktop.ini
 .agent/
 pilot-workspace/
 pilot-workspace-*/
+
+# Local BMAD Method install and generated artifacts
+_bmad/
+_bmad-output/
+.agents/skills/bmad-*/
