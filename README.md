@@ -118,6 +118,9 @@ The complete syntax, output modes, and exit codes are documented in
 - [Core concepts](docs/concepts.md)
 - [Evaluation recovery](docs/recovery.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Release history](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## V1 boundaries
 
