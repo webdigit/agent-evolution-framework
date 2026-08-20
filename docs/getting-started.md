@@ -6,7 +6,7 @@ You can install the tagged Git source when Git is available. The release wheel
 does not require Git:
 
 ```console
-python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/agent_evolution_framework-1.0.0-py3-none-any.whl"
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/agent_evolution_framework-1.1.0-py3-none-any.whl"
 ```
 
 Pip can still need network access for dependencies, so this is not a complete
@@ -56,7 +56,23 @@ aef audit
 The audit is read-only. Fix reported missing or invalid state before running a
 modifying operation.
 
-## 3. Use AEF with an agent
+## 3. Record a declared fact
+
+RECORD stores an explicit declaration under `.agent/records/<record_id>.json`.
+AEF computes the digest. The command does not update scores, career,
+competency, knowledge, or evaluation state.
+
+```console
+aef record --recording docs/examples/recording.json --dry-run
+aef record --recording docs/examples/recording.json
+```
+
+`--dry-run` writes nothing: it creates neither the records directory nor the
+record file. Replaying the same valid document returns `NO_CHANGE`. Reusing
+the same `record_id` with different content is blocked without rewriting the
+existing file.
+
+## 4. Use AEF with an agent
 
 A natural-language request can be simple:
 
@@ -66,7 +82,7 @@ A natural-language request can be simple:
 AEF data remains ordinary JSON and Markdown under `.agent/`, so it can be
 inspected and backed up with the project.
 
-## 4. Optional Claude Code guidance
+## 5. Optional Claude Code guidance
 
 ```console
 aef integrate claude
@@ -76,7 +92,7 @@ aef integrate claude --status
 This adds a managed segment to `.claude/CLAUDE.md` in the project. It is
 guidance-only, project-scoped, and installs no hooks.
 
-## 5. Machine-readable output
+## 6. Machine-readable output
 
 Human-readable output is automatic in a terminal. Scripts and agents should
 request JSON explicitly:
@@ -89,5 +105,5 @@ aef --compact evaluate --list
 Use `--dry-run` before a supported modification when you want to inspect the
 planned bytes without writing them.
 
-See [Canonical input files](input-files.md) for executable DISCOVER,
+See [Canonical input files](input-files.md) for executable RECORD, DISCOVER,
 CONSOLIDATE, and EVALUATE documents.

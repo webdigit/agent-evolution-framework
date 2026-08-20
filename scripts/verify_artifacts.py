@@ -25,6 +25,7 @@ SCHEMAS = {
 }
 DOCUMENTATION_EXAMPLES = {
     "connectors.json", "reviews.json", "evaluation-decisions.json",
+    "recording.json",
 }
 FORBIDDEN_PARTS = {
     ".agent", ".venv", "__pycache__", ".pytest_cache", "build", "dist",

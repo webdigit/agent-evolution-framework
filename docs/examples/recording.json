@@ -1,0 +1,24 @@
+{
+  "declared_by": {
+    "identifier": "Alex Example",
+    "kind": "human"
+  },
+  "payload": {
+    "actions": [
+      {
+        "summary": "Inspected the planned INIT files"
+      }
+    ],
+    "context": "Reviewed an INIT dry-run before applying it.",
+    "evidence": [],
+    "incidents": [],
+    "outcomes": [
+      {
+        "summary": "Confirmed the instance identity and timestamp"
+      }
+    ]
+  },
+  "protocol": "aef.record.submit/v1",
+  "record_id": "review-failed-init",
+  "recorded_at": "2026-08-20T13:21:00Z"
+}

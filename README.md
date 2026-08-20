@@ -15,13 +15,13 @@ AEF V1 requires Python 3.11 or later. Install the tagged source from GitHub
 when Git is available:
 
 ```console
-python -m pip install "agent-evolution-framework @ git+https://github.com/webdigit/agent-evolution-framework.git@v1.0.0"
+python -m pip install "agent-evolution-framework @ git+https://github.com/webdigit/agent-evolution-framework.git@v1.1.0"
 ```
 
 Alternatively, install the release wheel directly. This method does not require Git:
 
 ```console
-python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/agent_evolution_framework-1.0.0-py3-none-any.whl"
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/agent_evolution_framework-1.1.0-py3-none-any.whl"
 ```
 
 Pip may still need network access to install dependencies, so the wheel alone
@@ -89,6 +89,8 @@ evaluation without an explicit user request. See
 ```console
 aef init --role generalist-agent
 aef audit
+aef record --recording recording.json --dry-run
+aef record --recording recording.json
 aef discover --snapshot connectors.json
 aef consolidate --reviews reviews.json
 aef evaluate --list
@@ -125,8 +127,12 @@ The complete syntax, output modes, and exit codes are documented in
 ## V1 boundaries
 
 - State and activation are project-local by default.
-- INIT, AUDIT, DISCOVER, CONSOLIDATE, EVALUATE, and Claude project integration
-  are available; UPGRADE is not part of V1.
+- INIT, AUDIT, RECORD, DISCOVER, CONSOLIDATE, EVALUATE, and Claude project
+  integration are available; UPGRADE is not part of V1.
+- RECORD persists an explicit declared-fact file under `.agent/records/`. AEF
+  computes the digest. Replay of a valid matching file returns `NO_CHANGE`;
+  the same `record_id` with different content is blocked. RECORD does not
+  create scores or update career, competency, knowledge, or evaluation state.
 - DISCOVER records connector capabilities but grants no authority.
 - CONSOLIDATE reviews existing rule lifecycles; it does not autonomously invent
   knowledge or principles.

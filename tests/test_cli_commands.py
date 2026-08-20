@@ -337,7 +337,7 @@ def test_malformed_json_is_invalid_configuration(tmp_path, capsys):
     assert code == 3
     assert envelope["error"] == {
         "code": "invalid_json",
-        "message": "A workspace JSON document is invalid.",
+        "message": "A JSON document is invalid.",
         "details": {},
     }
     assert str(manifest) not in captured.out
@@ -484,7 +484,7 @@ def test_subprocess_json_error_has_stable_stdout_and_filtered_stderr(
     assert completed.returncode == 3
     assert envelope["error"] == {
         "code": "invalid_json",
-        "message": "A workspace JSON document is invalid.",
+        "message": "A JSON document is invalid.",
         "details": {},
     }
     assert completed.stdout[end:].strip() == ""
