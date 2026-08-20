@@ -21,6 +21,7 @@ from scripts.prepare_draft_release import (
     locate_release_artifacts,
     sha256_file,
 )
+from scripts.verify_artifacts import assert_regular_tar_member
 
 
 def source_date_epoch(commit: str, *, cwd: Path) -> int:
@@ -36,6 +37,21 @@ def source_date_epoch(commit: str, *, cwd: Path) -> int:
     return int(result.stdout.strip())
 
 
+def release_build_command(outdir: Path) -> list[str]:
+    return [sys.executable, "-m", "build", "--no-isolation", "--outdir", str(outdir)]
+
+
+def assert_no_isolated_dependency_install(stdout: str, stderr: str) -> None:
+    combined = f"{stdout}\n{stderr}".casefold()
+    markers = (
+        "creating isolated environment",
+        "installing packages in isolated environment",
+        "installing build dependencies",
+    )
+    if any(marker in combined for marker in markers):
+        raise DraftReleaseError("build installed a floating backend dependency")
+
+
 def build_once(outdir: Path, *, epoch: int, cwd: Path) -> None:
     if outdir.exists():
         shutil.rmtree(outdir)
@@ -43,7 +59,7 @@ def build_once(outdir: Path, *, epoch: int, cwd: Path) -> None:
     env = os.environ.copy()
     env["SOURCE_DATE_EPOCH"] = str(epoch)
     result = subprocess.run(
-        [sys.executable, "-m", "build", "--outdir", str(outdir)],
+        release_build_command(outdir),
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -53,6 +69,7 @@ def build_once(outdir: Path, *, epoch: int, cwd: Path) -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip() or "build failed"
         raise DraftReleaseError(detail)
+    assert_no_isolated_dependency_install(result.stdout, result.stderr)
     wheel, sdist = locate_release_artifacts(outdir)
     normalize_sdist_timestamps(sdist, epoch)
 
@@ -76,8 +93,14 @@ def normalize_sdist_timestamps(path: Path, epoch: int) -> None:
         members = []
         contents: dict[str, bytes] = {}
         for member in source.getmembers():
+            try:
+                assert_regular_tar_member(member)
+            except ValueError as exc:
+                raise DraftReleaseError(str(exc)) from exc
             rebuilt = _canonical_tarinfo(member, epoch=epoch)
             if member.isfile():
+                if member.name in contents:
+                    raise DraftReleaseError("duplicate archive members")
                 extracted = source.extractfile(member)
                 if extracted is None:
                     raise DraftReleaseError(f"sdist member is unreadable: {member.name}")

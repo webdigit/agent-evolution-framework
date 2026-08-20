@@ -27,9 +27,11 @@ Pushing an annotated tag `vX.Y.Z` that points at a commit on `main` starts
 
 1. checks out that tag, not a local operator tree;
 2. verifies the tag is reachable from `origin/main`;
-3. installs the pinned tools from `requirements-release.txt`;
+3. installs the pinned tools from `requirements-release.txt`, including the
+   exact `setuptools` backend;
 4. derives `SOURCE_DATE_EPOCH` from the tagged commit and builds wheel and
-   sdist twice in clean directories, requiring identical SHA-256 hashes;
+   sdist twice in clean directories with `--no-isolation`, requiring
+   identical SHA-256 hashes;
 5. runs `twine check`, `check-wheel-contents`, and
    `scripts/verify_artifacts.py`;
 6. rebuilds a wheel from the sdist and verifies it;
@@ -42,16 +44,18 @@ Pushing an annotated tag `vX.Y.Z` that points at a commit on `main` starts
 
 Private paths such as `docs/prompts/`, `_bmad/`, `_bmad-output/`, `.agents/`,
 and `.agent/` are refused in both archives after strict member normalization.
-Case-folded names, `.env*` files, private keys, credentials, local
-configuration files, backslashes, traversal, and ambiguous segments fail
-closed.
+Case-folded names, strictly duplicated ZIP members, symbolic or hard
+links, device nodes, other non-regular TAR types, `.env*` files, private
+keys, credentials, local configuration files, backslashes, traversal, and
+ambiguous segments fail closed.
 
 ## Retry mode
 
 If the workflow is interrupted after the tag exists, rerun it with
 `workflow_dispatch` and the same tag. The retry rebuilds from the tagged
-commit with the same `SOURCE_DATE_EPOCH` and pinned tools, then rereads the
-draft attribution before any upload or reuse. The retry is idempotent when
+commit with the same `SOURCE_DATE_EPOCH`, the same pinned frontend and
+backend, and `--no-isolation`, then rereads the draft attribution before
+any upload or reuse. The retry is idempotent when
 the commit proof, Release name, tag, draft state, and assets are identical.
 A published Release, a moved tag, or a divergent asset fails closed even if
 both commits belong to `main`. The workflow does not delete the Release or

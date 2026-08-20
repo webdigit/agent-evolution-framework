@@ -32,7 +32,9 @@ from scripts.prepare_draft_release import (
 )
 from scripts.reproducible_build import (
     assert_identical_release_builds,
+    assert_no_isolated_dependency_install,
     build_once,
+    release_build_command,
     source_date_epoch,
 )
 
@@ -43,9 +45,17 @@ COMMIT_B = "b" * 40
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+CI = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 SCRIPT = (ROOT / "scripts/prepare_draft_release.py").read_text(encoding="utf-8")
+BUILD_SCRIPT = (ROOT / "scripts/reproducible_build.py").read_text(encoding="utf-8")
 DOCS = (ROOT / "docs/release.md").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
+RELEASE_PINS = [
+    "build==1.5.0",
+    "check-wheel-contents==0.6.3",
+    "setuptools==84.0.0",
+    "twine==6.2.0",
+]
 
 
 def _git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -307,6 +317,8 @@ def test_release_workflow_never_publishes_or_moves_tags():
     assert "DELETE" not in SCRIPT
     assert "scripts/reproducible_build.py" in WORKFLOW
     assert "requirements-release.txt" in WORKFLOW
+    assert "--no-isolation" in BUILD_SCRIPT
+    assert "python -m build --no-isolation" in CI
     assert "SOURCE_DATE_EPOCH" in (ROOT / "scripts/reproducible_build.py").read_text(
         encoding="utf-8"
     )
@@ -388,11 +400,34 @@ def test_two_clean_builds_of_the_same_commit_are_byte_identical(tmp_path):
     right_wheel, right_sdist = locate_release_artifacts(second)
     assert left_wheel.stat().st_size > 0
     assert left_sdist.stat().st_size > 0
-    assert (ROOT / "requirements-release.txt").read_text(encoding="utf-8").splitlines() == [
-        "build==1.5.0",
-        "check-wheel-contents==0.6.3",
-        "twine==6.2.0",
-    ]
+    assert (ROOT / "requirements-release.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == RELEASE_PINS
+
+
+def test_release_backend_is_pinned_and_builds_without_isolation():
+    pins = (ROOT / "requirements-release.txt").read_text(encoding="utf-8").splitlines()
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert pins == RELEASE_PINS
+    assert 'requires = ["setuptools==84.0.0"]' in project
+    assert "setuptools>=" not in project
+    command = release_build_command(Path("dist"))
+    assert command[1:4] == ["-m", "build", "--no-isolation"]
+    assert "--isolation" not in command
+
+
+def test_isolated_backend_install_is_rejected():
+    with pytest.raises(DraftReleaseError, match="floating backend"):
+        assert_no_isolated_dependency_install(
+            "* Creating isolated environment: venv+pip...\n"
+            "* Installing packages in isolated environment:\n"
+            "  - setuptools>=77\n",
+            "",
+        )
+    assert_no_isolated_dependency_install(
+        "* Getting build dependencies for sdist...\n* Building sdist...\n",
+        "",
+    )
 
 
 def test_release_attribution_is_canonical_and_commit_bound():
@@ -473,5 +508,7 @@ def test_release_documentation_covers_gates_and_recovery():
         "SOURCE_DATE_EPOCH",
         "AEF_RELEASE_ATTRIBUTION",
         "moved tag",
+        "--no-isolation",
+        "setuptools",
     ):
         assert fragment in DOCS

@@ -61,6 +61,7 @@ PRIVATE_PARTS_FOLD = {part.casefold() for part in PRIVATE_PARTS}
 PRIVATE_PREFIXES_FOLD = tuple(
     tuple(part.casefold() for part in prefix) for prefix in PRIVATE_PREFIXES
 )
+ALLOWED_TAR_TYPES = {tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE}
 
 
 def _zip_raw_names(path: Path) -> list[str]:
@@ -88,12 +89,28 @@ def _zip_raw_names(path: Path) -> list[str]:
     return sorted(names)
 
 
+def assert_regular_tar_member(member: tarfile.TarInfo) -> None:
+    if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+        raise ValueError("non-regular archive member")
+    if member.type not in ALLOWED_TAR_TYPES:
+        raise ValueError("non-regular archive member")
+
+
+def _sdist_file_names(path: Path) -> list[str]:
+    names: list[str] = []
+    with tarfile.open(path, "r:gz") as archive:
+        for member in archive.getmembers():
+            assert_regular_tar_member(member)
+            if member.isfile():
+                names.append(member.name)
+    return sorted(names)
+
+
 def _members(path: Path) -> list[str]:
     if path.suffix == ".whl":
         return _zip_raw_names(path)
     if path.name.endswith(".tar.gz"):
-        with tarfile.open(path, "r:gz") as archive:
-            return sorted(member.name for member in archive if member.isfile())
+        return _sdist_file_names(path)
     raise ValueError(f"unsupported artifact: {path.name}")
 
 
@@ -109,7 +126,11 @@ def member_parts(name: str) -> tuple[str, ...]:
 def assert_safe_members(names: list[str]) -> list[tuple[str, ...]]:
     normalized = [member_parts(name) for name in names]
     seen: dict[tuple[str, ...], tuple[str, ...]] = {}
+    exact: set[tuple[str, ...]] = set()
     for parts in normalized:
+        if parts in exact:
+            raise ValueError("duplicate archive members")
+        exact.add(parts)
         key = tuple(part.casefold() for part in parts)
         previous = seen.get(key)
         if previous is not None and previous != parts:

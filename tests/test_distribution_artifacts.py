@@ -23,7 +23,7 @@ def _wheel(path, *, schemas=SCHEMAS, extra=()):
             archive.writestr(_zip_info(name), "local")
 
 
-def _sdist(path, extra=(), extra_named=None):
+def _sdist(path, extra=(), extra_named=None, duplicates=(), extra_infos=()):
     files = {
         "agent-evolution-framework-0.1.0/README.md": b"README",
         "agent-evolution-framework-0.1.0/pyproject.toml": b"[project]",
@@ -44,6 +44,13 @@ def _sdist(path, extra=(), extra_named=None):
             info = tarfile.TarInfo(name)
             info.size = len(content)
             archive.addfile(info, io.BytesIO(content))
+        for name in duplicates:
+            content = b"duplicate"
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        for info in extra_infos:
+            archive.addfile(info)
 
 
 def test_release_artifact_inspector_accepts_complete_wheel_and_sdist(tmp_path):
@@ -154,4 +161,43 @@ def test_release_artifact_inspector_rejects_case_collision_in_sdist(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="case-colliding"):
+        inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_duplicate_member_in_wheel(tmp_path):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=["aef/extra.py", "aef/extra.py"])
+    with pytest.raises(ValueError, match="duplicate archive members"):
+        inspect_artifact(wheel)
+
+
+def test_release_artifact_inspector_rejects_duplicate_member_in_sdist(tmp_path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(sdist, duplicates=["agent-evolution-framework-0.1.0/README.md"])
+    with pytest.raises(ValueError, match="duplicate archive members"):
+        inspect_artifact(sdist)
+
+
+@pytest.mark.parametrize(
+    "tar_type,linkname",
+    [
+        (tarfile.SYMTYPE, "README.md"),
+        (tarfile.LNKTYPE, "agent-evolution-framework-0.1.0/README.md"),
+        (tarfile.CHRTYPE, ""),
+        (tarfile.BLKTYPE, ""),
+        (tarfile.FIFOTYPE, ""),
+    ],
+)
+def test_release_artifact_inspector_rejects_non_regular_sdist_member(
+    tmp_path, tar_type, linkname
+):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    info = tarfile.TarInfo("agent-evolution-framework-0.1.0/weird")
+    info.type = tar_type
+    info.linkname = linkname
+    if tar_type in {tarfile.CHRTYPE, tarfile.BLKTYPE}:
+        info.devmajor = 1
+        info.devminor = 3
+    _sdist(sdist, extra_infos=[info])
+    with pytest.raises(ValueError, match="non-regular archive member"):
         inspect_artifact(sdist)
