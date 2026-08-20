@@ -58,6 +58,8 @@ from .operations import (
     consolidate_project,
     init_project,
 )
+from .record_document import InvalidRecordSubmissionError, build_persisted_record
+from .record_store import InvalidRecordStoreError, persist_record
 
 
 API_VERSION = "aef.cli/v1"
@@ -192,6 +194,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         status = envelope["status"]
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
+            "RECORD",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -201,6 +204,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
             "CONSOLIDATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "EVALUATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "INTEGRATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "RECORD": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
         }
         if status not in allowed[command]:
             return False
@@ -485,6 +489,29 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 "[OK] Claude integration is already installed\n\nChanges : none\n"
             )
 
+        if command == "RECORD":
+            record_id = _escape_human_value(result.get("record_id", "unknown"))
+            if status == "CHANGE":
+                return (
+                    "[OK] AEF recorded a declaration\n\n"
+                    f"Record    : {record_id}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF record is unchanged\n\n"
+                    f"Record    : {record_id}\n"
+                    f"Workspace : {workspace}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                return (
+                    "[BLOCKED] AEF record conflicts with an existing file\n\n"
+                    f"Record    : {record_id}\n"
+                    "Reason    : record conflict\n"
+                    f"Workspace : {workspace}\n"
+                )
+
         marker = "FAILED" if status == "FAILED" else "ERROR"
         safe_status = _escape_human_value(status)
         return f"[{marker}] AEF command ended with status {safe_status}\n"
@@ -570,6 +597,15 @@ def _build_parser() -> argparse.ArgumentParser:
     evaluation_action.add_argument("--refresh", action="store_true", help="refresh recommendation state")
     evaluation_action.add_argument("--recover", action="store_true", help="recover an interrupted EVALUATE transaction")
     evaluate_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
+    record_parser = commands.add_parser(
+        "record", help="persist an explicit declared-fact recording",
+        description="Validate and persist a declared-fact recording without granting authority.",
+    )
+    record_parser.add_argument(
+        "--recording", required=True, metavar="FILE",
+        help="declared-fact recording document",
+    )
+    record_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
     integrate_parser = commands.add_parser(
         "integrate", help="manage project-local integrations",
         description="Manage guidance integrations confined to this project.",
@@ -745,7 +781,7 @@ def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 def _run_audit(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
     _validate_json_documents(workspace)
-    result = audit_project(load_workspace(workspace))
+    result = audit_project(load_workspace(workspace), root=workspace)
     status = result["status"]
     envelope = _envelope(
         command="AUDIT",
@@ -758,6 +794,48 @@ def _run_audit(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         diff=None,
     )
     return envelope, _exit_code("AUDIT", status)
+
+
+def _run_record(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    document = _load_snapshot(args.recording)
+    try:
+        persisted = build_persisted_record(document)
+    except InvalidRecordSubmissionError as exc:
+        raise CLIInputError(exc.code, str(exc)) from exc
+    try:
+        status, relative, digest = persist_record(
+            workspace, persisted, dry_run=args.dry_run
+        )
+    except InvalidRecordStoreError as exc:
+        raise CLIInputError(exc.code, str(exc)) from exc
+    result = {
+        "record_id": persisted["record_id"],
+        "path": relative,
+        "digest": digest,
+    }
+    if status == "CHANGE":
+        diff: dict[str, list[str]] | None = {
+            "created": [relative], "modified": [], "removed": [],
+        }
+        meta: dict[str, Any] = {}
+    elif status == "NO_CHANGE":
+        diff = {"created": [], "modified": [], "removed": []}
+        meta = {}
+    else:
+        diff = None
+        meta = {"reason": "record_conflict"}
+    envelope = _envelope(
+        command="RECORD",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("RECORD", status)
 
 
 def _load_snapshot(path: str | Path) -> Any:
@@ -1050,7 +1128,7 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "bridge_healthy": False, "workspace_compatible": False,
         }
     warnings = _claude_settings_warnings(workspace) if args.status_only else []
-    audit = audit_project(current) if args.status_only else None
+    audit = audit_project(current, root=workspace) if args.status_only else None
     pending = None
     if args.status_only:
         try:
@@ -1101,6 +1179,8 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_consolidate(args)
     if args.command == "integrate":
         return _run_integrate(args)
+    if args.command == "record":
+        return _run_record(args)
     return _run_evaluate(args)
 
 
@@ -1109,6 +1189,16 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         code = exc.code
         message = exc.public_message
         details = exc.details
+        exit_code = 3
+    elif isinstance(exc, InvalidRecordSubmissionError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidRecordStoreError):
+        code = exc.code
+        message = str(exc)
+        details = {}
         exit_code = 3
     elif isinstance(exc, InvalidDecisionsDocumentError):
         code = "invalid_decisions_document"

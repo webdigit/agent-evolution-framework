@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/record-submission.schema.json",
+  "title": "AEF Record Submission",
+  "description": "Declared-fact submission. Digest is forbidden. AEF persists aef.record/v1 after computing the digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "record_id", "recorded_at", "declared_by", "payload"],
+  "properties": {
+    "protocol": {"const": "aef.record.submit/v1"},
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?Z$"
+    },
+    "declared_by": {"$ref": "#/$defs/declared_by"},
+    "payload": {"$ref": "#/$defs/payload"},
+    "external_metrics": {"$ref": "#/$defs/external_metrics"}
+  },
+  "$defs": {
+    "declared_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identifier"],
+      "properties": {
+        "kind": {"enum": ["human", "agent"]},
+        "identifier": {"type": "string", "minLength": 1}
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context", "actions", "outcomes", "incidents", "evidence"],
+      "properties": {
+        "context": {"type": "string", "minLength": 1},
+        "actions": {"$ref": "#/$defs/item_array"},
+        "outcomes": {"$ref": "#/$defs/item_array"},
+        "incidents": {"$ref": "#/$defs/item_array"},
+        "evidence": {"$ref": "#/$defs/item_array"}
+      }
+    },
+    "item_array": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "minProperties": 1
+      }
+    },
+    "external_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "duration": {"$ref": "#/$defs/duration_metric"},
+        "tokens_in": {"$ref": "#/$defs/token_metric"},
+        "tokens_out": {"$ref": "#/$defs/token_metric"},
+        "cost": {"$ref": "#/$defs/cost_metric"}
+      }
+    },
+    "duration_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "measurement"],
+      "properties": {
+        "value": {"type": "number", "minimum": 0},
+        "unit": {"const": "s"},
+        "measurement": {"$ref": "#/$defs/measurement"}
+      }
+    },
+    "token_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "measurement"],
+      "properties": {
+        "value": {"type": "number", "minimum": 0},
+        "unit": {"const": "token"},
+        "measurement": {"$ref": "#/$defs/measurement"}
+      }
+    },
+    "cost_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "measurement"],
+      "properties": {
+        "value": {"type": "number", "minimum": 0},
+        "unit": {"const": "usd"},
+        "measurement": {"$ref": "#/$defs/measurement"}
+      }
+    },
+    "measurement": {"enum": ["measured", "reported", "estimated"]}
+  }
+}

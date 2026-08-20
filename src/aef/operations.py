@@ -362,7 +362,7 @@ def upgrade_project(project, *, target_version, migrations):
     return ("CHANGE" if changed else "NO_CHANGE"), out, {"applied": applied}
 
 
-def audit_project(project):
+def audit_project(project, root=None):
     """Read-only structural audit. Never mutates project state."""
     files = project.get("files", {})
     manifest = files.get(".agent/manifest.json")
@@ -383,6 +383,11 @@ def audit_project(project):
             validate_persisted_knowledge(files[knowledge_path])
         except InvalidKnowledgeStateError:
             findings.append({"id": "invalid-knowledge-state", "severity": "error"})
+    from .record_audit import audit_records_directory, audit_records_in_files
+    if root is not None:
+        findings.extend(audit_records_directory(root))
+    else:
+        findings.extend(audit_records_in_files(files))
     return {
         "status": "PASS" if not any(f["severity"] == "error" for f in findings) else "FAIL",
         "schema_version": manifest.get("schema_version") if manifest else None,
