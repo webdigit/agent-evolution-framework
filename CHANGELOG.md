@@ -2,6 +2,33 @@
 
 All notable changes to AEF are documented in this file.
 
+## [1.1.0] - 2026-08-20
+
+### Added
+
+- RECORD V1 persists an explicit declared-fact recording with
+  `aef record --recording FILE [--dry-run]`.
+- Replay of a valid matching record returns `NO_CHANGE` without rewriting the
+  file.
+
+### Changed
+
+- Replay revalidates an existing persisted record, including its canonical
+  digest, before returning `NO_CHANGE`.
+- Clearer public `invalid_json` message for invalid JSON, including a
+  `--recording` file. The message no longer claims every parse failure is a
+  workspace document.
+
+### Documentation
+
+- RECORD command, exit-code coverage, and a minimal `aef.record.submit/v1`
+  example.
+
+### Boundaries
+
+- RECORD writes only `.agent/records/<record_id>.json`. It does not create
+  scores, XP, competencies, rules, or evaluations.
+
 ## [1.0.1] - 2026-08-17
 
 ### Fixed
@@ -38,4 +65,5 @@ Initial public V1 release.
   1.0.0 and is not open source.
 
 [1.0.0]: https://github.com/webdigit/agent-evolution-framework/releases/tag/v1.0.0
-[1.0.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.0...HEAD
+[1.0.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.0...v1.0.1
+[1.1.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.1...HEAD

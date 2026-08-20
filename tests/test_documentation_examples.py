@@ -15,6 +15,7 @@ from aef.filesystem import apply_workspace, load_workspace
 from aef.knowledge_state import validate_knowledge_state
 from aef.operations import validate_discovery_snapshot
 from aef.promotion_recommendations import validate_evaluation_state
+from aef.record_document import build_persisted_record, validate_record_submission
 from aef.schema_validation import draft202012_validator, load_packaged_schema
 from aef.strict_json import validate_strict_json
 
@@ -139,6 +140,10 @@ def test_documentation_examples_are_strict_and_use_official_validators():
     )
     assert validate_consolidation_document(_document("reviews.json"))["reviews"]
     assert validate_evaluation_decisions(_document("evaluation-decisions.json"))["decisions"]
+    recording = validate_record_submission(_document("recording.json"))
+    persisted = build_persisted_record(recording)
+    assert persisted["protocol"] == "aef.record/v1"
+    assert persisted["digest"].startswith("sha256:")
 
 
 def test_documentation_examples_execute_real_cli_dry_runs(tmp_path, capsys):
@@ -151,6 +156,7 @@ def test_documentation_examples_execute_real_cli_dry_runs(tmp_path, capsys):
         ["discover", "--snapshot", str(EXAMPLES / "connectors.json")],
         ["consolidate", "--reviews", str(EXAMPLES / "reviews.json")],
         ["evaluate", "--decisions", str(EXAMPLES / "evaluation-decisions.json")],
+        ["record", "--recording", str(EXAMPLES / "recording.json")],
     ]
     for command in commands:
         code = cli.main(["--json", "--workspace", str(workspace), *command, "--dry-run"])
@@ -187,10 +193,14 @@ def test_documentation_links_and_command_claims_are_current():
     guide = (ROOT / "docs/input-files.md").read_text(encoding="utf-8")
 
     assert (ROOT / "docs/input-files.md").is_file()
-    for name in ("connectors.json", "reviews.json", "evaluation-decisions.json"):
+    for name in ("connectors.json", "reviews.json", "evaluation-decisions.json", "recording.json"):
         assert (EXAMPLES / name).is_file()
         assert f"examples/{name}" in guide
-    for fragment in ("evaluate --refresh --dry-run", "evaluate --recover --dry-run"):
+    for fragment in (
+        "evaluate --refresh --dry-run",
+        "evaluate --recover --dry-run",
+        "record --recording FILE [--dry-run]",
+    ):
         assert fragment in commands or fragment in guide
     assert "Canonical input files" in readme
     assert "pip install agent-evolution-framework" not in readme
@@ -199,8 +209,8 @@ def test_documentation_links_and_command_claims_are_current():
     assert "Personal User Name" not in guide
 
     wheel_url = (
-        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.0.0/"
-        "agent_evolution_framework-1.0.0-py3-none-any.whl"
+        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/"
+        "agent_evolution_framework-1.1.0-py3-none-any.whl"
     )
     for document in (readme, installation, getting_started):
         assert wheel_url in document

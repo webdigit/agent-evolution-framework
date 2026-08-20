@@ -103,6 +103,32 @@ complete human record. Mere file presence is never approval. EVALUATE
 recomputes readiness and blocks stale evidence. It never advances more than one
 level.
 
+## RECORD declared-fact submission
+
+Use [recording.json](examples/recording.json):
+
+```console
+aef record --recording docs/examples/recording.json --dry-run
+aef record --recording docs/examples/recording.json
+```
+
+The closed root uses protocol `aef.record.submit/v1`. It requires a
+filesystem-safe `record_id`, a canonical RFC 3339 UTC `recorded_at` ending with
+`Z`, a `declared_by` object (`kind` is `human` or `agent`, plus a non-empty
+`identifier`), and a `payload` with `context` plus the four collections
+`actions`, `outcomes`, `incidents`, and `evidence`. At least one collection
+must contain an item. Optional `external_metrics` may declare `duration`,
+`tokens_in`, `tokens_out`, or `cost` with their contractual units.
+
+Do not include a `digest`. AEF computes it when persisting `aef.record/v1`.
+RECORD stores the declaration only; it does not create scores, XP,
+competencies, rules, or evaluations.
+
+`--dry-run` creates neither `.agent/records/` nor the record file. Replaying
+the same valid document against a valid matching file returns `NO_CHANGE`
+without rewriting. Reusing `record_id` with different content is a conflict
+and does not rewrite the existing file.
+
 ## Refresh and recovery
 
 `aef evaluate --list` is strictly read-only. Refresh may change recommendation

@@ -25,6 +25,7 @@ def _sdist(path):
             "agent-evolution-framework-0.1.0/docs/examples/connectors.json": b"{}",
             "agent-evolution-framework-0.1.0/docs/examples/reviews.json": b"{}",
             "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
+            "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
             **{
                 f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
                 for schema in SCHEMAS

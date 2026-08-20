@@ -12,7 +12,12 @@ from .filesystem import (
     is_link_or_reparse_point,
     load_workspace,
 )
-from .record_document import record_relative_path, validate_persisted_record
+from .record_document import (
+    InvalidPersistedRecordError,
+    InvalidRecordSubmissionError,
+    record_relative_path,
+    validate_persisted_record,
+)
 
 
 class InvalidRecordStoreError(ValueError):
@@ -29,6 +34,18 @@ def _entry_exists(path: Path) -> bool:
     except FileNotFoundError:
         return False
     return True
+
+
+def _existing_persisted_record(path: Path) -> dict[str, Any] | None:
+    """Return a valid existing record, or None when replay must block."""
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    try:
+        return validate_persisted_record(existing)
+    except (InvalidPersistedRecordError, InvalidRecordSubmissionError):
+        return None
 
 
 def persist_record(
@@ -56,11 +73,8 @@ def persist_record(
                 "record_target_unsafe",
                 "the existing record path is not a regular file.",
             )
-        try:
-            existing = json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return "BLOCKED", relative, document["digest"]
-        if isinstance(existing, dict) and existing.get("digest") == document["digest"]:
+        existing = _existing_persisted_record(target)
+        if existing is not None and existing == document:
             return "NO_CHANGE", relative, document["digest"]
         return "BLOCKED", relative, document["digest"]
 

@@ -796,9 +796,19 @@ def _run_audit(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return envelope, _exit_code("AUDIT", status)
 
 
+def _load_recording(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The recording document is not valid JSON.",
+        ) from exc
+
+
 def _run_record(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
-    document = _load_snapshot(args.recording)
+    document = _load_recording(args.recording)
     try:
         persisted = build_persisted_record(document)
     except InvalidRecordSubmissionError as exc:
@@ -1262,7 +1272,7 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         exit_code = 6
     elif isinstance(exc, (json.JSONDecodeError, UnicodeError)):
         code = "invalid_json"
-        message = "A workspace JSON document is invalid."
+        message = "A JSON document is invalid."
         details = {}
         exit_code = 3
     elif isinstance(exc, ValueError):

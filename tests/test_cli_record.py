@@ -55,7 +55,7 @@ def test_dry_run_change_does_not_create_records(tmp_path, capsys):
         "modified": [],
         "removed": [],
     }
-    assert not (tmp_path / ".agent" / "records").exists()
+    assert not (tmp_path / ".agent").exists()
 
 
 def test_apply_creates_then_replay_is_no_change(tmp_path, capsys):
@@ -129,6 +129,73 @@ def test_invalid_record_id_exits_three(tmp_path, capsys):
     assert code == 3
     assert envelope["error"]["code"] == "invalid_record_id"
     assert not (tmp_path / ".agent" / "records").exists()
+
+
+def test_invalid_recording_json_uses_stable_public_message(tmp_path, capsys):
+    recording = tmp_path / "recording.json"
+    recording.write_text("{broken", encoding="utf-8")
+
+    code, envelope, captured = invoke(
+        capsys, "--json", "--workspace", str(tmp_path),
+        "record", "--recording", str(recording), "--dry-run",
+    )
+
+    assert code == 3
+    assert envelope["status"] == "ERROR"
+    assert envelope["error"] == {
+        "code": "invalid_json",
+        "message": "The recording document is not valid JSON.",
+        "details": {},
+    }
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert "{broken" not in captured.out
+    assert "{broken" not in captured.err
+    assert not (tmp_path / ".agent").exists()
+
+
+def test_invalid_recording_json_human_renderer_is_stable(tmp_path, capsys):
+    recording = tmp_path / "recording.json"
+    recording.write_text("{broken", encoding="utf-8")
+
+    code = cli.main([
+        "--human", "--workspace", str(tmp_path),
+        "record", "--recording", str(recording),
+    ])
+    captured = capsys.readouterr()
+
+    assert code == 3
+    assert captured.out.startswith("[ERROR] The recording document is not valid JSON.\n")
+    assert "Code      : invalid_json" in captured.out
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert "{broken" not in captured.out
+    assert "{broken" not in captured.err
+    assert not (tmp_path / ".agent").exists()
+
+
+def test_tampered_existing_record_is_blocked_without_rewrite(tmp_path, capsys):
+    recording = write_recording(tmp_path / "recording.json")
+    cli.main([
+        "--json", "--workspace", str(tmp_path),
+        "record", "--recording", str(recording),
+    ])
+    capsys.readouterr()
+    path = tmp_path / ".agent" / "records" / "session-alpha.json"
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["payload"]["context"] = "tampered after persist"
+    path.write_text(json.dumps(stored, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+
+    code, envelope, _ = invoke(
+        capsys, "--json", "--workspace", str(tmp_path),
+        "record", "--recording", str(recording),
+    )
+
+    assert code == 4
+    assert envelope["status"] == "BLOCKED"
+    assert envelope["meta"]["reason"] == "record_conflict"
+    assert path.read_bytes() == before
 
 
 def test_human_renderer_accepts_record(tmp_path, capsys):
