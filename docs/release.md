@@ -15,6 +15,11 @@ These three human gates stay separate:
 A green CI run or an audit report is not authorization. The workflow never
 merges, never creates or moves a tag, and never publishes a Release.
 
+GitHub Actions does not accept a separate `releases` permission on
+`GITHUB_TOKEN`. The workflow therefore uses `contents: write`, the minimum
+valid permission that can attach draft assets. Extra write capabilities are
+not used.
+
 ## Tag trigger
 
 Pushing an annotated tag `vX.Y.Z` that points at a commit on `main` starts

@@ -267,9 +267,9 @@ def test_already_published_release_fails_closed():
 
 
 def test_release_workflow_uses_minimal_permissions():
-    assert "contents: read" in WORKFLOW
-    assert "releases: write" in WORKFLOW
-    assert "contents: write" not in WORKFLOW
+    assert "contents: write" in WORKFLOW
+    assert "releases:" not in WORKFLOW
+    assert "contents: read" not in WORKFLOW
     assert "concurrency:" in WORKFLOW
     assert "aef-draft-release-" in WORKFLOW
 

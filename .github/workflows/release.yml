@@ -12,8 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: read
-  releases: write
+  contents: write
 
 concurrency:
   group: aef-draft-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
