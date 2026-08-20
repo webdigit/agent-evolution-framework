@@ -1,0 +1,34 @@
+# sprint-status.yaml — AEF local
+# 2026-08-20 — epic-completion-yolo epic 2 (implémentation) — rétro complète, post-doc, git SKIP — _bmad-output/implementation-artifacts/epic-2-retro-2026-08-20.md
+# 2026-08-20 — delivery pipeline YOLO epic 2 (dev 1d–1g) — stories 2.1–2.6 done, suite 1084 passed, pas de bump/tag/Release
+# 2026-08-20 — delivery pipeline YOLO epic 2 (2e passe) — validate-create-story + risques 2.1–2.6, toujours ready-for-dev, pas d’implémentation
+# 2026-08-20 — document completion YOLO epic 2 (rétro partielle cadrage) — _bmad-output/implementation-artifacts/epic-2-retro-2026-08-20.md — pas de docs/ suivis, pas de git
+# 2026-08-20 — delivery pipeline YOLO epic 2 — stories 2.1–2.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-2-upgrade-v1-x-substrat-migration-workspace.md
+# 2026-08-20 — opp-2 GO humain + cadrage UPGRADE V1.x verrouillé
+# 2026-08-20 — opp-2 analyse de pertinence GO conditionnel — CLI aef upgrade + journal distinct + cible 1.0.0 ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-2-upgrade-v1-x-substrat-migration-workspace.md
+# 2026-08-20 — opp-2 créée — UPGRADE V1.x substrat migration workspace — _bmad-output/planning-artifacts/opportunities/opp-2-upgrade-v1-x-substrat-migration-workspace.md — pas d’Epic avant GO
+# 2026-08-20 — réconciliation tracker ↔ code : RECORD V1 déjà livré (1.1.0) ; AC 1.1–1.5 tenus ; 71 tests RECORD verts
+# 2026-08-20 — delivery pipeline YOLO epic 1 — validate-create-story 1.1–1.5, skip create, pas d’implémentation
+# 2026-08-20 — clarification pré-DEV epic 1 — contrats submit/persist, ordre 1.1→1.5 strict, pas de code
+# 2026-08-20 — delivery pipeline YOLO epic 1 — stories ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-1-record-v1-alimenter-memoire-evolution.md
+# 2026-08-20 — opp-1 GO humain + cadrage RECORD V1 verrouillé
+# 2026-08-20 — opp-1 analyse de pertinence GO conditionnel — CLI + journal append-only ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-1-record-v1-alimenter-memoire-evolution.md
+# 2026-08-20 — opp-1 créée — RECORD V1 alimenter mémoire d’évolution — _bmad-output/planning-artifacts/opportunities/opp-1-record-v1-alimenter-memoire-evolution.md — pas d’Epic avant GO
+
+development_status:
+
+  epic-2-upgrade-v1-x-substrat-migration-workspace: done
+  epic-2-retrospective: done
+  epic-2-1-audit-brownfield-plan-fichiers: done
+  epic-2-2-contrats-upgrade-v1: done
+  epic-2-3-cli-check-dry-run: done
+  epic-2-4-appliquer-transaction: done
+  epic-2-5-recuperer-auditer: done
+  epic-2-6-cloisonnement-documentation: done
+
+  epic-1-record-v1-alimenter-memoire-evolution: done
+  epic-1-1-contrat-aef-record-v1: done
+  epic-1-2-stockage-immuable-records: done
+  epic-1-3-cli-aef-record: done
+  epic-1-4-audit-enregistrements: done
+  epic-1-5-garde-fous-isolation: done
