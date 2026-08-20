@@ -24,6 +24,7 @@ JSON_PATHS = {
     ".agent/knowledge/knowledge.json",
 }
 EVALUATION_TRANSACTION_PATH = ".agent/state/evaluation-transaction.json"
+RECORDS_DIRECTORY = ".agent/records"
 
 WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -246,7 +247,7 @@ def _serialize(rel_path: str, value: Any) -> str:
     return str(value)
 
 
-def _is_link_or_reparse_point(path: Path) -> bool:
+def is_link_or_reparse_point(path: Path) -> bool:
     """Return true for symlinks, Windows junctions, and other reparse points."""
     try:
         metadata = path.lstat()
@@ -260,6 +261,9 @@ def _is_link_or_reparse_point(path: Path) -> bool:
     attributes = getattr(metadata, "st_file_attributes", 0)
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     return bool(attributes & reparse_flag)
+
+
+_is_link_or_reparse_point = is_link_or_reparse_point
 
 
 def _validate_workspace_path(root: Path, rel_path: str) -> Path:
@@ -290,7 +294,7 @@ def _validate_workspace_path(root: Path, rel_path: str) -> Path:
     cursor = root
     for part in parts:
         cursor = cursor / part
-        if _is_link_or_reparse_point(cursor):
+        if is_link_or_reparse_point(cursor):
             raise WorkspacePathError(f"workspace path crosses a link or reparse point: {rel_path!r}")
 
     resolved_target = target.resolve(strict=False)

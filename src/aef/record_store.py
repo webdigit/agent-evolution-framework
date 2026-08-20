@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import json
+import os
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from .filesystem import (
+    RECORDS_DIRECTORY,
+    apply_workspace,
+    is_link_or_reparse_point,
+    load_workspace,
+)
+from .record_document import record_relative_path, validate_persisted_record
+
+
+class InvalidRecordStoreError(ValueError):
+    """Raised when RECORD cannot persist safely."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+def _entry_exists(path: Path) -> bool:
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def persist_record(
+    root: str | Path,
+    persisted: dict[str, Any],
+    *,
+    dry_run: bool = False,
+) -> tuple[str, str, str]:
+    """Persist one aef.record/v1 file. Creates records/ only on first Apply CHANGE."""
+    document = validate_persisted_record(persisted)
+    relative = record_relative_path(document["record_id"])
+    root = Path(root).resolve()
+    records_dir = root.joinpath(*RECORDS_DIRECTORY.split("/"))
+    target = root.joinpath(*relative.split("/"))
+
+    if _entry_exists(records_dir):
+        if is_link_or_reparse_point(records_dir) or not records_dir.is_dir():
+            raise InvalidRecordStoreError(
+                "record_target_unsafe",
+                "the records directory is not a regular directory.",
+            )
+    if _entry_exists(target):
+        if is_link_or_reparse_point(target) or not target.is_file():
+            raise InvalidRecordStoreError(
+                "record_target_unsafe",
+                "the existing record path is not a regular file.",
+            )
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return "BLOCKED", relative, document["digest"]
+        if isinstance(existing, dict) and existing.get("digest") == document["digest"]:
+            return "NO_CHANGE", relative, document["digest"]
+        return "BLOCKED", relative, document["digest"]
+
+    if dry_run:
+        return "CHANGE", relative, document["digest"]
+
+    current = load_workspace(root)
+    desired = deepcopy(current)
+    desired.setdefault("files", {})
+    desired["files"][relative] = deepcopy(document)
+    apply_workspace(root, current, desired)
+    return "CHANGE", relative, document["digest"]

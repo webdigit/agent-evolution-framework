@@ -51,6 +51,17 @@ def test_release_artifact_inspector_rejects_missing_schema(tmp_path):
         inspect_artifact(wheel)
 
 
+def test_release_artifact_inspector_rejects_unexpected_schema(tmp_path):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, schemas=SCHEMAS | {"unexpected.schema.json"})
+    with pytest.raises(ValueError, match="schema set is incomplete"):
+        inspect_artifact(wheel)
+
+
+def test_record_runtime_schemas_are_required_in_artifact_contract():
+    assert {"record-submission.schema.json", "record.schema.json"} <= SCHEMAS
+
+
 @pytest.mark.parametrize("path", [".agent/state.json", ".venv/marker", "aef/__pycache__/x.pyc"])
 def test_release_artifact_inspector_rejects_local_state(tmp_path, path):
     wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"

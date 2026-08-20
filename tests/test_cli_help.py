@@ -28,6 +28,7 @@ def test_top_level_help_explains_project_scope_and_machine_output(capsys):
         (["evaluate", "--help"], "explicit human decisions"),
         (["integrate", "--help"], "confined to this project"),
         (["integrate", "claude", "--help"], "V1 supports project only"),
+        (["record", "--help"], "declared-fact"),
     ],
 )
 def test_command_help_describes_the_available_contract(arguments, expected, capsys):
