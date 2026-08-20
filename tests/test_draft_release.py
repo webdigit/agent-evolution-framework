@@ -100,6 +100,12 @@ class MemoryGitHub:
         self.next_id = 1
         self.contents: dict[str, bytes] = {}
 
+    def get_release(self, release_id: int):
+        for record in self.releases.values():
+            if record["id"] == release_id:
+                return record
+        return None
+
     def get_release_by_tag(self, tag: str):
         return self.releases.get(tag)
 
@@ -228,6 +234,137 @@ def test_write_sha256sums_covers_wheel_and_sdist(tmp_path):
     assert checksums.name == "SHA256SUMS.txt"
     records = parse_sha256sums(checksums.read_text(encoding="ascii"))
     assert set(records) == {wheel.name, sdist.name}
+
+
+class _FakeResponse:
+    def __init__(self, payload, content_type="application/json"):
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
+        self._body = body
+        self.headers = {"Content-Type": content_type}
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class GitHubDraftTag404:
+    """GitHub's /releases/tags/{tag} endpoint omits drafts."""
+
+    def __init__(self):
+        self.next_id = 11
+        self.releases: dict[int, dict] = {}
+
+    def __call__(self, request, timeout=60):
+        method = request.get_method()
+        url = request.full_url
+        if method == "GET" and "/releases/tags/" in url:
+            raise HTTPError(
+                url,
+                404,
+                "Not Found",
+                hdrs=None,
+                fp=io.BytesIO(b'{"message":"Not Found"}'),
+            )
+        if method == "GET" and "/releases?" in url:
+            return _FakeResponse(list(self.releases.values()))
+        if method == "GET" and "/releases/" in url:
+            release_id = int(url.rsplit("/", 1)[1])
+            record = self.releases.get(release_id)
+            if record is None:
+                raise HTTPError(
+                    url,
+                    404,
+                    "Not Found",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"message":"Not Found"}'),
+                )
+            return _FakeResponse(record)
+        if method == "POST" and url.endswith("/releases"):
+            body = json.loads(request.data.decode("utf-8"))
+            record = {
+                "id": self.next_id,
+                "tag_name": body["tag_name"],
+                "name": body["name"],
+                "draft": True,
+                "html_url": f"https://example.test/{body['tag_name']}",
+                "upload_url": (
+                    f"https://uploads.example.test/{self.next_id}/assets{{?name,label}}"
+                ),
+                "body": body["body"],
+                "assets": [],
+            }
+            self.releases[self.next_id] = record
+            self.next_id += 1
+            return _FakeResponse(record)
+        if method == "POST" and "/assets" in url:
+            name = url.split("name=", 1)[1]
+            content = request.data
+            record = next(iter(self.releases.values()))
+            asset = {
+                "name": name,
+                "size": len(content),
+                "digest": f"sha256:{hashlib.sha256(content).hexdigest()}",
+                "url": f"https://example.test/assets/{name}",
+            }
+            record["assets"].append(asset)
+            return _FakeResponse(asset)
+        raise AssertionError(f"unexpected request {method} {url}")
+
+
+def test_github_draft_survives_tag_endpoint_404():
+    from scripts.prepare_draft_release import GitHubReleases
+
+    opener = GitHubDraftTag404()
+    client = GitHubReleases(
+        token="ghp_test_token",
+        repository="webdigit/agent-evolution-framework",
+        api_url="https://api.example.test",
+        opener=opener,
+    )
+    desired = _desired()
+    release, plan = apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
+    assert plan.action == "create"
+    assert release.draft is True
+    assert release.release_id == 11
+    assert {asset.name for asset in release.assets} == {asset.name for asset in desired}
+
+    reused, retry = apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
+    assert retry.action == "reuse"
+    assert reused.release_id == 11
+    assert len(opener.releases) == 1
+
+
+def test_multiple_releases_for_the_same_tag_fail_closed():
+    from scripts.prepare_draft_release import GitHubReleases
+
+    opener = GitHubDraftTag404()
+    first = {
+        "id": 1,
+        "tag_name": "v1.2.0",
+        "name": "AEF 1.2.0",
+        "draft": True,
+        "html_url": "https://example.test/one",
+        "body": render_release_body(tag="v1.2.0", commit=COMMIT_A, version="1.2.0"),
+        "assets": [],
+    }
+    opener.releases = {1: first, 2: {**first, "id": 2, "html_url": "https://example.test/two"}}
+    client = GitHubReleases(
+        token="ghp_test_token",
+        repository="webdigit/agent-evolution-framework",
+        api_url="https://api.example.test",
+        opener=opener,
+    )
+    with pytest.raises(DraftReleaseError, match="multiple Releases share this tag"):
+        client.get_release_by_tag("v1.2.0")
 
 
 def test_simulated_draft_release_creation_uploads_exact_assets():
@@ -510,5 +647,7 @@ def test_release_documentation_covers_gates_and_recovery():
         "moved tag",
         "--no-isolation",
         "setuptools",
+        "tag lookup omits drafts",
+        "release ID",
     ):
         assert fragment in DOCS

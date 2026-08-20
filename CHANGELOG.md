@@ -4,6 +4,12 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Draft Release lookup no longer treats GitHub's tag-endpoint 404 as a
+  disappeared Release. Drafts are found by listing Releases and refreshed
+  by release ID after upload.
+
 ## [1.1.1] - 2026-08-20
 
 ### Added
