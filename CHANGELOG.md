@@ -4,6 +4,34 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-20
+
+### Added
+
+- UPGRADE V1.x migrates the project-local workspace toward the contract of
+  the already installed package via `aef upgrade --check`, `--dry-run`,
+  apply, `--recover --dry-run`, and `--recover`.
+- A dedicated journal at `.agent/state/upgrade-transaction.json`
+  (`aef.upgrade-transaction/v1`) protects that mutation. It is distinct
+  from the EVALUATE journal.
+- AUDIT reports `upgrade-recovery-required`, and distinct findings when a
+  journal is bound to another workspace or to divergent schema versions.
+
+### Documentation
+
+- UPGRADE command forms and recovery: journal confinement under `.agent/`,
+  workspace identity binding, and rollback of `prepared` plus an all-after
+  disk state.
+
+### Boundaries
+
+- Upgrade is not a software update. There is no `aef update` command and
+  no `--target-schema` flag. The productive workspace target remains
+  `schema_version` `1.0.0`.
+- Lab helpers `upgrade_project` and `apply_framework_release` stay unexposed.
+- Recovery never follows a journal path outside `.agent/`. A mixed
+  before/after set or unknown hash stays `BLOCKED` without writing.
+
 ## [1.1.2] - 2026-08-20
 
 ### Fixed
@@ -88,3 +116,4 @@ Initial public V1 release.
 [1.1.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.1...v1.1.0
 [1.1.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.0...v1.1.1
 [1.1.2]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.1...v1.1.2
+[1.2.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.2...v1.2.0
