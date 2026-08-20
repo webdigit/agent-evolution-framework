@@ -356,8 +356,30 @@ class GitHubReleases:
                 f"GitHub {method} failed: {exc.code} {detail}"
             ) from None
 
+    def get_release(self, release_id: int) -> dict[str, Any] | None:
+        url = f"{self._api_url}/repos/{self._repository}/releases/{int(release_id)}"
+        return self._release_or_none(url)
+
     def get_release_by_tag(self, tag: str) -> dict[str, Any] | None:
-        url = f"{self._api_url}/repos/{self._repository}/releases/tags/{urllib.parse.quote(tag)}"
+        # GitHub's tag endpoint returns only published Releases. Drafts 404.
+        published = self._release_or_none(
+            f"{self._api_url}/repos/{self._repository}/releases/tags/"
+            f"{urllib.parse.quote(tag)}"
+        )
+        if published is not None:
+            return published
+        matches = [
+            payload
+            for payload in self._iter_releases()
+            if payload.get("tag_name") == tag
+        ]
+        if len(matches) > 1:
+            raise DraftReleaseError("multiple Releases share this tag")
+        if matches:
+            return matches[0]
+        return None
+
+    def _release_or_none(self, url: str) -> dict[str, Any] | None:
         try:
             payload = self._request("GET", url)
         except DraftReleaseError as exc:
@@ -367,6 +389,27 @@ class GitHubReleases:
         if not isinstance(payload, dict):
             raise DraftReleaseError("GitHub release payload is invalid")
         return payload
+
+    def _iter_releases(self) -> Sequence[dict[str, Any]]:
+        page = 1
+        found: list[dict[str, Any]] = []
+        while True:
+            url = (
+                f"{self._api_url}/repos/{self._repository}/releases"
+                f"?per_page=100&page={page}"
+            )
+            payload = self._request("GET", url)
+            if not isinstance(payload, list):
+                raise DraftReleaseError("GitHub releases payload is invalid")
+            if not payload:
+                return found
+            for item in payload:
+                if not isinstance(item, dict):
+                    raise DraftReleaseError("GitHub release payload is invalid")
+                found.append(item)
+            if len(payload) < 100:
+                return found
+            page += 1
 
     def create_draft_release(
         self, *, tag: str, version: str, commit: str
@@ -483,7 +526,7 @@ def apply_draft_release(
         raise DraftReleaseError("draft Release is missing an upload URL")
     for asset in plan.uploads:
         client.upload_asset(upload_url, asset)
-    refreshed = client.get_release_by_tag(tag)
+    refreshed = client.get_release(existing.release_id)
     if refreshed is None:
         raise DraftReleaseError("draft Release disappeared after upload")
     return existing_release_from_payload(client, refreshed), plan

@@ -75,8 +75,11 @@ unchanged.
 ## A draft Release job failed
 
 Read [Release delivery](release.md). Do not move an existing tag, delete a
-divergent asset, or publish from a local checkout. Rerun the workflow for the
-same tag only when the intended assets are unchanged.
+divergent asset, or publish from a local checkout. If the job reports
+`draft Release disappeared after upload`, the draft may already exist:
+GitHub's tag lookup returns 404 for drafts. Inspect that draft. Rerun the
+workflow for the same tag only when the intended assets are unchanged and
+the prepare script can resolve drafts by list and release ID.
 
 ## Report a problem
 

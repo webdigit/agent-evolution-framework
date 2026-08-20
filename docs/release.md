@@ -55,7 +55,9 @@ If the workflow is interrupted after the tag exists, rerun it with
 `workflow_dispatch` and the same tag. The retry rebuilds from the tagged
 commit with the same `SOURCE_DATE_EPOCH`, the same pinned frontend and
 backend, and `--no-isolation`, then rereads the draft attribution before
-any upload or reuse. The retry is idempotent when
+any upload or reuse. GitHub's tag lookup omits drafts, so the script finds
+an existing draft by listing Releases and refreshes it by release ID after
+upload. The retry is idempotent when
 the commit proof, Release name, tag, draft state, and assets are identical.
 A published Release, a moved tag, or a divergent asset fails closed even if
 both commits belong to `main`. The workflow does not delete the Release or
