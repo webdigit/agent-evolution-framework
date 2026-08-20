@@ -8,9 +8,14 @@ from typing import Any
 
 from .filesystem import (
     RECORDS_DIRECTORY,
+    UpgradeRecoveryRequiredError,
     apply_workspace,
     is_link_or_reparse_point,
     load_workspace,
+)
+from .upgrade_transaction import (
+    upgrade_transaction_entry_present,
+    upgrade_transaction_present,
 )
 from .record_document import (
     InvalidPersistedRecordError,
@@ -61,6 +66,12 @@ def persist_record(
     records_dir = root.joinpath(*RECORDS_DIRECTORY.split("/"))
     target = root.joinpath(*relative.split("/"))
 
+    current = load_workspace(root)
+    if upgrade_transaction_present(current) or upgrade_transaction_entry_present(root):
+        raise UpgradeRecoveryRequiredError(
+            "upgrade recovery is required before workspace mutation"
+        )
+
     if _entry_exists(records_dir):
         if is_link_or_reparse_point(records_dir) or not records_dir.is_dir():
             raise InvalidRecordStoreError(
@@ -81,7 +92,6 @@ def persist_record(
     if dry_run:
         return "CHANGE", relative, document["digest"]
 
-    current = load_workspace(root)
     desired = deepcopy(current)
     desired.setdefault("files", {})
     desired["files"][relative] = deepcopy(document)

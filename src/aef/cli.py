@@ -20,10 +20,13 @@ from .decisions import (
 )
 from .filesystem import (
     EvaluationRecoveryRequiredError,
+    UpgradeRecoveryRequiredError,
     apply_workspace,
     load_workspace,
     plan_workspace,
 )
+from .upgrade_plan import MigrationFailure
+from .upgrade_ops import run_upgrade
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -194,7 +197,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         status = envelope["status"]
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
-            "RECORD",
+            "RECORD", "UPGRADE",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -205,6 +208,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
             "EVALUATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "INTEGRATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "RECORD": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "UPGRADE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
         }
         if status not in allowed[command]:
             return False
@@ -254,6 +258,13 @@ def _render_human(envelope: dict[str, Any]) -> str:
             message = _escape_human_value(error["message"])
             code = _escape_human_value(error["code"])
             return f"[ERROR] {message}\n\nCode      : {code}\n"
+
+        if status == "BLOCKED" and envelope["meta"].get("reason") == "upgrade_recovery_required":
+            return (
+                "[BLOCKED] AEF upgrade recovery is required\n\n"
+                f"Workspace : {workspace}\n"
+                "Reason    : upgrade recovery required\n"
+            )
 
         if command == "INIT":
             if status == "CHANGE":
@@ -489,6 +500,37 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 "[OK] Claude integration is already installed\n\nChanges : none\n"
             )
 
+        if command == "UPGRADE":
+            if status == "CHANGE":
+                if envelope.get("dry_run"):
+                    heading = "AEF upgrade plan is ready"
+                elif envelope["result"].get("recovery_action") in {"rollback", "finalize"}:
+                    heading = "AEF recovered the upgrade"
+                else:
+                    heading = "AEF upgraded the workspace"
+                return (
+                    f"[OK] {heading}\n\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF workspace is already current\n\n"
+                    f"Workspace : {workspace}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF upgrade is blocked\n\n"
+                    f"Reason    : {reason}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "FAILED":
+                return (
+                    "[FAILED] AEF upgrade failed\n\n"
+                    f"Workspace : {workspace}\n"
+                )
+
         if command == "RECORD":
             record_id = _escape_human_value(result.get("record_id", "unknown"))
             if status == "CHANGE":
@@ -625,6 +667,26 @@ def _build_parser() -> argparse.ArgumentParser:
     claude_action.add_argument("--status", action="store_true", dest="status_only", help="inspect status without writing")
     claude_action.add_argument("--remove", action="store_true", help="remove only the managed AEF segment")
     claude_parser.add_argument("--dry-run", action="store_true", help="render the exact bridge change without writing")
+    upgrade_parser = commands.add_parser(
+        "upgrade",
+        help="verify or apply workspace schema evolution",
+        description=(
+            "Check, preview, apply, or recover workspace upgrades for the "
+            "installed package. This is not a package update."
+        ),
+    )
+    upgrade_parser.add_argument(
+        "--check", action="store_true",
+        help="show the upgrade plan without writing",
+    )
+    upgrade_parser.add_argument(
+        "--recover", action="store_true",
+        help="recover an interrupted UPGRADE transaction",
+    )
+    upgrade_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="compute the projected result without writing",
+    )
     return parser
 
 
@@ -635,6 +697,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error("argument --compact: not allowed with argument --human")
     if args.command == "integrate" and args.status_only and args.dry_run:
         parser.error("argument --dry-run: not allowed with argument --status")
+    if args.command == "upgrade" and args.check and args.recover:
+        parser.error("argument --check: not allowed with argument --recover")
+    if args.command == "upgrade" and args.check and args.dry_run:
+        parser.error("argument --check: not allowed with argument --dry-run")
     return args
 
 
@@ -671,8 +737,14 @@ def _validate_json_documents(workspace: Path) -> None:
     agent_dir = workspace / ".agent"
     if not agent_dir.exists():
         return
+    skip = {
+        ".agent/state/upgrade-transaction.json",
+    }
     for path in sorted(agent_dir.rglob("*.json")):
         if path.is_file():
+            relative = path.relative_to(workspace).as_posix()
+            if relative in skip:
+                continue
             json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -1191,7 +1263,37 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_integrate(args)
     if args.command == "record":
         return _run_record(args)
+    if args.command == "upgrade":
+        return _run_upgrade(args)
     return _run_evaluate(args)
+
+
+def _run_upgrade(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    if args.recover and args.dry_run:
+        mode = "recover_dry_run"
+    elif args.recover:
+        mode = "recover"
+    elif args.check:
+        mode = "check"
+    elif args.dry_run:
+        mode = "dry_run"
+    else:
+        mode = "apply"
+    status, result, extra = run_upgrade(workspace, mode=mode)
+    diff = extra.get("diff")
+    meta = extra.get("meta") or {}
+    envelope = _envelope(
+        command="UPGRADE",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=bool(args.dry_run or args.check),
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("UPGRADE", status)
 
 
 def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str, Any], int]:
@@ -1265,6 +1367,30 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         message = "Evaluation recovery is required before workspace mutation."
         details = {}
         exit_code = 4
+    elif isinstance(exc, UpgradeRecoveryRequiredError):
+        envelope = _envelope(
+            command=args.command.upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": "upgrade_recovery_required"},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, MigrationFailure):
+        envelope = _envelope(
+            command=args.command.upper(),
+            workspace=args.workspace,
+            status="FAILED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": "migration_failed", "migration_id": exc.migration_id},
+            diff=None,
+        )
+        return envelope, 5
     elif isinstance(exc, ClaudeIntegrationFilesystemError):
         code = "claude_integration_filesystem_error"
         message = "The Claude project integration could not be written safely."
@@ -1317,13 +1443,17 @@ def main(argv: list[str] | None = None) -> int:
                 _write_stderr("aef: invalid internal result\n")
     except Exception as exc:
         envelope, exit_code = _error_envelope(args, exc)
-        error = envelope["error"]
-        if args.verbose:
-            _write_stderr(
-                f"aef: {error['code']} ({type(exc).__name__}): {error['message']}\n"
-            )
-        else:
-            _write_stderr(f"aef: {error['code']}: {error['message']}\n")
+        error = envelope.get("error")
+        if isinstance(error, dict):
+            if args.verbose:
+                _write_stderr(
+                    f"aef: {error['code']} ({type(exc).__name__}): {error['message']}\n"
+                )
+            else:
+                _write_stderr(f"aef: {error['code']}: {error['message']}\n")
+        elif envelope.get("status") == "BLOCKED":
+            reason = envelope.get("meta", {}).get("reason", "blocked")
+            _write_stderr(f"aef: {reason}\n")
     try:
         if _output_mode(args) == "human":
             rendered = _render_human(envelope)

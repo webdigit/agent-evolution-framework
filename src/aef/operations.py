@@ -2,7 +2,10 @@ from copy import deepcopy
 from .init_profiles import DEFAULT_CORE_FILES, get_default_core_files, get_init_profile
 from .migrations import apply_migration
 from .strict_json import InvalidStrictJSONError, validate_strict_json
-from .transaction_guard import mutation_guard_metadata
+from .transaction_guard import (
+    evaluation_recovery_required,
+    mutation_guard_metadata,
+)
 from .consolidation import validate_consolidation_document
 from .knowledge_state import (
     EVIDENCE_COLLECTIONS,
@@ -371,8 +374,10 @@ def audit_project(project, root=None):
         findings.append({"id": "missing-manifest", "severity": "error"})
     if ".agent/state/migrations.json" not in files:
         findings.append({"id": "missing-migration-ledger", "severity": "warning"})
-    if mutation_guard_metadata(project) is not None:
+    if evaluation_recovery_required(project):
         findings.append({"id": "evaluation-recovery-required", "severity": "error"})
+    from .upgrade_ops import audit_upgrade_findings
+    findings.extend(audit_upgrade_findings(project, root=root))
     knowledge_path = ".agent/knowledge/knowledge.json"
     if knowledge_path not in files:
         findings.append({"id": "missing-knowledge-state", "severity": "error"})

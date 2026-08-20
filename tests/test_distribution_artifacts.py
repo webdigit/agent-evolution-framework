@@ -80,6 +80,10 @@ def test_record_runtime_schemas_are_required_in_artifact_contract():
     assert {"record-submission.schema.json", "record.schema.json"} <= SCHEMAS
 
 
+def test_upgrade_transaction_schema_is_required_in_artifact_contract():
+    assert "upgrade-transaction.schema.json" in SCHEMAS
+
+
 @pytest.mark.parametrize("path", [".agent/state.json", ".venv/marker", "aef/__pycache__/x.pyc"])
 def test_release_artifact_inspector_rejects_local_state(tmp_path, path):
     wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"

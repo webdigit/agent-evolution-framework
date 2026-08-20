@@ -12,7 +12,10 @@
           "id":{"type":"string"},
           "from_version":{"type":"string"},
           "to_version":{"type":"string"},
-          "status":{"enum":["applied","failed","rolled_back"]}
+          "status":{"enum":["applied","failed","rolled_back"]},
+          "transaction_id":{"type":"string"},
+          "migration_fingerprint":{"type":"string"},
+          "result_fingerprint":{"type":"string"}
         },
         "additionalProperties": true
       }

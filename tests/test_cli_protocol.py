@@ -121,6 +121,10 @@ def test_final_output_boundary_never_retries_or_leaks(
     ("RECORD", "CHANGE", 0),
     ("RECORD", "NO_CHANGE", 0),
     ("RECORD", "BLOCKED", 4),
+    ("UPGRADE", "CHANGE", 0),
+    ("UPGRADE", "NO_CHANGE", 0),
+    ("UPGRADE", "BLOCKED", 4),
+    ("UPGRADE", "FAILED", 5),
 ])
 def test_protocol_exit_code_mapping(command, status, expected):
     assert cli._exit_code(command, status) == expected
