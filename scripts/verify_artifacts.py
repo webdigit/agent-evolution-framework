@@ -19,6 +19,8 @@ SCHEMAS = {
     "manifest.schema.json",
     "migrations.schema.json",
     "policies.schema.json",
+    "record-submission.schema.json",
+    "record.schema.json",
     "supervision.schema.json",
 }
 DOCUMENTATION_EXAMPLES = {
