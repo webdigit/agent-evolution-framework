@@ -1,5 +1,10 @@
 # Lessons learned — AEF (local)
 
+## 2026-08-20 — U5 hors checkout
+
+- Valider le wheel installé hors checkout, pas le worktree : un checkout accidentel sur `main` produit un wheel sans modules UPGRADE.
+- Sur cible productive `1.0.0`, U5 doit rester `NO_CHANGE` ; le apply mutant appartient aux tests synthétiques.
+
 ## 2026-08-20 — Epic 2 implémentation (clôture)
 
 - Distinguer Update et Upgrade **avant** le code évite un lot réseau ; le tenir dans la CLI (`pas de --target-schema`) est le vrai test.
