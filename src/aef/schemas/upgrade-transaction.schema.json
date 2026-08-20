@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/upgrade-transaction.schema.json",
+  "title": "AEF UPGRADE transaction journal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "transaction_id",
+    "workspace_instance_id",
+    "from_schema_version",
+    "to_schema_version",
+    "phase",
+    "migration_ids",
+    "paths",
+    "created_paths",
+    "files"
+  ],
+  "properties": {
+    "protocol": { "const": "aef.upgrade-transaction/v1" },
+    "transaction_id": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "workspace_instance_id": { "type": "string", "minLength": 1 },
+    "from_schema_version": { "type": "string", "minLength": 1 },
+    "to_schema_version": { "type": "string", "minLength": 1 },
+    "phase": { "enum": ["prepared", "committed"] },
+    "migration_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "created_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "before_hash", "after_hash", "before_content", "after_content"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "before_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "after_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "before_content": { "type": "string" },
+          "after_content": { "type": "string" }
+        }
+      }
+    }
+  }
+}
