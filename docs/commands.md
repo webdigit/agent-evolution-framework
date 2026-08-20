@@ -105,6 +105,31 @@ aef integrate claude --remove [--dry-run] [--scope project]
 
 Only project scope exists in V1.
 
+## UPGRADE
+
+```console
+aef upgrade --check
+aef upgrade --dry-run
+aef upgrade
+aef upgrade --recover --dry-run
+aef upgrade --recover
+```
+
+Upgrade migrates the **workspace** `.agent/` toward the contract supported by
+the **already installed** package. It is not a software update. There is no
+`aef update` command and no `--target-schema` flag.
+
+`--check` shows the plan without writing. `--dry-run` computes the projected
+result without creating a file or directory. `upgrade` applies the plan.
+`--recover` handles only an unfinished UPGRADE transaction.
+
+On a valid V1 workspace already at `schema_version` `1.0.0`, `--check`,
+`--dry-run`, `upgrade`, and replay return `NO_CHANGE`.
+
+The envelope stays `aef.cli/v1` with `command=UPGRADE`. Human and JSON output
+carry the same decision. `init`, `record`, `evaluate`, and `audit` do not
+trigger an upgrade.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -114,7 +139,7 @@ Only project scope exists in V1.
 | 2 | Invalid command-line arguments |
 | 3 | Invalid input document or unsupported option, including an invalid `--recording` file |
 | 4 | Operation blocked without mutation, including a RECORD conflict or an unreadable existing record |
-| 5 | Reserved for a business operation returning `FAILED` |
+| 5 | Business `FAILED`, including a declared UPGRADE `MigrationFailure` |
 | 6 | Filesystem or permission failure |
 | 70 | Unexpected internal failure |
 
