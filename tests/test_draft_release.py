@@ -20,14 +20,25 @@ from scripts.prepare_draft_release import (
     assert_package_version_matches_tag,
     locate_release_artifacts,
     operator_summary,
+    parse_attribution_body,
     parse_release_tag,
     parse_sha256sums,
     plan_draft_release,
     redact_secrets,
+    render_release_body,
     render_sha256sums,
     version_from_wheel,
     write_sha256sums,
 )
+from scripts.reproducible_build import (
+    assert_identical_release_builds,
+    build_once,
+    source_date_epoch,
+)
+
+
+COMMIT_A = "a" * 40
+COMMIT_B = "b" * 40
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,7 +93,7 @@ class MemoryGitHub:
     def get_release_by_tag(self, tag: str):
         return self.releases.get(tag)
 
-    def create_draft_release(self, *, tag: str, version: str):
+    def create_draft_release(self, *, tag: str, version: str, commit: str):
         record = {
             "id": self.next_id,
             "tag_name": tag,
@@ -92,6 +103,7 @@ class MemoryGitHub:
             "upload_url": (
                 f"https://uploads.example.test/{self.next_id}/assets{{?name,label}}"
             ),
+            "body": render_release_body(tag=tag, commit=commit, version=version),
             "assets": [],
         }
         self.next_id += 1
@@ -212,7 +224,7 @@ def test_simulated_draft_release_creation_uploads_exact_assets():
     client = MemoryGitHub()
     desired = _desired()
     release, plan = apply_draft_release(
-        client, tag="v1.2.0", version="1.2.0", desired=desired
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
     )
     assert plan.action == "create"
     assert release.draft is True
@@ -224,9 +236,11 @@ def test_simulated_draft_release_creation_uploads_exact_assets():
 def test_identical_retry_reuses_draft_without_duplicates():
     client = MemoryGitHub()
     desired = _desired()
-    apply_draft_release(client, tag="v1.2.0", version="1.2.0", desired=desired)
+    apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
     release, plan = apply_draft_release(
-        client, tag="v1.2.0", version="1.2.0", desired=desired
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
     )
     assert plan.action == "reuse"
     assert plan.uploads == ()
@@ -238,9 +252,11 @@ def test_divergent_assets_fail_closed_without_deletion():
     desired = _desired()
     existing = ExistingRelease(
         tag="v1.2.0",
+        name="AEF 1.2.0",
         draft=True,
         html_url="https://example.test/v1.2.0",
         release_id=1,
+        commit=COMMIT_A,
         assets=(
             ExistingAsset(
                 name="aef-1.2.0-py3-none-any.whl",
@@ -250,20 +266,26 @@ def test_divergent_assets_fail_closed_without_deletion():
         ),
     )
     with pytest.raises(DraftReleaseError, match="divergent asset"):
-        plan_draft_release(existing, desired)
+        plan_draft_release(
+            existing, desired, tag="v1.2.0", commit=COMMIT_A, version="1.2.0"
+        )
 
 
 def test_already_published_release_fails_closed():
     desired = _desired()
     existing = ExistingRelease(
         tag="v1.2.0",
+        name="AEF 1.2.0",
         draft=False,
         html_url="https://example.test/v1.2.0",
         release_id=1,
+        commit=COMMIT_A,
         assets=(),
     )
     with pytest.raises(DraftReleaseError, match="already published"):
-        plan_draft_release(existing, desired)
+        plan_draft_release(
+            existing, desired, tag="v1.2.0", commit=COMMIT_A, version="1.2.0"
+        )
 
 
 def test_release_workflow_uses_minimal_permissions():
@@ -283,7 +305,11 @@ def test_release_workflow_never_publishes_or_moves_tags():
     assert '"draft": True' in SCRIPT
     assert '"draft": False' not in SCRIPT
     assert "DELETE" not in SCRIPT
-    assert "python -m build" in WORKFLOW
+    assert "scripts/reproducible_build.py" in WORKFLOW
+    assert "requirements-release.txt" in WORKFLOW
+    assert "SOURCE_DATE_EPOCH" in (ROOT / "scripts/reproducible_build.py").read_text(
+        encoding="utf-8"
+    )
     assert "python -m twine check" in WORKFLOW
     assert "check-wheel-contents dist/*.whl" in WORKFLOW
     assert "scripts/verify_artifacts.py" in WORKFLOW
@@ -332,7 +358,9 @@ def test_operator_summary_requires_human_publish():
         validations=("twine_check",),
         assets=desired,
         draft_release_url="https://example.test/v1.2.0",
-        plan=plan_draft_release(None, desired),
+        plan=plan_draft_release(
+            None, desired, tag="v1.2.0", commit=COMMIT_A, version="1.2.0"
+        ),
     )
     assert summary["human_action_required"] == "publish_release"
     assert summary["tag"] == "v1.2.0"
@@ -349,6 +377,86 @@ def test_version_from_wheel_reads_metadata(tmp_path):
     assert version_from_wheel(wheel) == "1.2.0"
 
 
+def test_two_clean_builds_of_the_same_commit_are_byte_identical(tmp_path):
+    epoch = source_date_epoch("HEAD", cwd=ROOT)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    build_once(first, epoch=epoch, cwd=ROOT)
+    build_once(second, epoch=epoch, cwd=ROOT)
+    assert_identical_release_builds(first, second)
+    left_wheel, left_sdist = locate_release_artifacts(first)
+    right_wheel, right_sdist = locate_release_artifacts(second)
+    assert left_wheel.stat().st_size > 0
+    assert left_sdist.stat().st_size > 0
+    assert (ROOT / "requirements-release.txt").read_text(encoding="utf-8").splitlines() == [
+        "build==1.5.0",
+        "check-wheel-contents==0.6.3",
+        "twine==6.2.0",
+    ]
+
+
+def test_release_attribution_is_canonical_and_commit_bound():
+    body = render_release_body(tag="v1.2.0", commit=COMMIT_A, version="1.2.0")
+    payload = parse_attribution_body(body)
+    assert payload["commit"] == COMMIT_A
+    assert payload["tag"] == "v1.2.0"
+    assert payload["name"] == "AEF 1.2.0"
+    assert payload["schema"] == "aef.release.attribution/v1"
+
+
+def test_partial_draft_then_moved_tag_fails_closed():
+    client = MemoryGitHub()
+    desired = _desired()
+    apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
+    record = client.releases["v1.2.0"]
+    record["assets"] = [
+        asset for asset in record["assets"] if asset["name"] == "SHA256SUMS.txt"
+    ]
+    with pytest.raises(DraftReleaseError, match="moved tag"):
+        apply_draft_release(
+            client, tag="v1.2.0", version="1.2.0", commit=COMMIT_B, desired=desired
+        )
+    assert [asset["name"] for asset in record["assets"]] == ["SHA256SUMS.txt"]
+    assert client.deleted == []
+
+
+def test_partial_draft_same_commit_completes_missing_assets():
+    client = MemoryGitHub()
+    desired = _desired()
+    apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
+    record = client.releases["v1.2.0"]
+    record["assets"] = [
+        asset for asset in record["assets"] if asset["name"] == "SHA256SUMS.txt"
+    ]
+    release, plan = apply_draft_release(
+        client, tag="v1.2.0", version="1.2.0", commit=COMMIT_A, desired=desired
+    )
+    assert plan.action == "complete"
+    assert {asset.name for asset in release.assets} == {asset.name for asset in desired}
+    assert client.deleted == []
+
+
+def test_existing_release_identity_mismatch_fails_closed():
+    desired = _desired()
+    existing = ExistingRelease(
+        tag="v1.2.0",
+        name="Wrong name",
+        draft=True,
+        html_url="https://example.test/v1.2.0",
+        release_id=1,
+        commit=COMMIT_A,
+        assets=(),
+    )
+    with pytest.raises(DraftReleaseError, match="release name"):
+        plan_draft_release(
+            existing, desired, tag="v1.2.0", commit=COMMIT_A, version="1.2.0"
+        )
+
+
 def test_release_documentation_covers_gates_and_recovery():
     assert "docs/release.md" in README
     for fragment in (
@@ -362,5 +470,8 @@ def test_release_documentation_covers_gates_and_recovery():
         "SHA-256",
         "draft Release",
         "recovery",
+        "SOURCE_DATE_EPOCH",
+        "AEF_RELEASE_ATTRIBUTION",
+        "moved tag",
     ):
         assert fragment in DOCS

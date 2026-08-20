@@ -20,8 +20,11 @@ from typing import Any, Callable, Sequence
 
 
 TAG_PATTERN = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SHA256SUMS_NAME = "SHA256SUMS.txt"
+ATTRIBUTION_MARKER = "AEF_RELEASE_ATTRIBUTION"
+ATTRIBUTION_SCHEMA = "aef.release.attribution/v1"
 
 
 class DraftReleaseError(ValueError):
@@ -52,9 +55,11 @@ class ExistingAsset:
 @dataclass(frozen=True)
 class ExistingRelease:
     tag: str
+    name: str
     draft: bool
     html_url: str
     release_id: int
+    commit: str
     assets: tuple[ExistingAsset, ...]
 
 
@@ -75,6 +80,66 @@ def parse_release_tag(tag: str) -> str:
     if not TAG_PATTERN.fullmatch(tag):
         raise DraftReleaseError(f"malformed release tag: {tag}")
     return tag[1:]
+
+
+def normalize_commit(commit: str) -> str:
+    value = commit.strip().lower()
+    if not HEX40.fullmatch(value):
+        raise DraftReleaseError(f"release commit is invalid: {commit}")
+    return value
+
+
+def expected_release_name(version: str) -> str:
+    return f"AEF {version}"
+
+
+def attribution_payload(*, tag: str, commit: str, version: str) -> dict[str, str]:
+    return {
+        "commit": normalize_commit(commit),
+        "name": expected_release_name(version),
+        "schema": ATTRIBUTION_SCHEMA,
+        "tag": tag,
+        "version": version,
+    }
+
+
+def render_attribution_line(payload: dict[str, str]) -> str:
+    return json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def render_release_body(*, tag: str, commit: str, version: str) -> str:
+    payload = attribution_payload(tag=tag, commit=commit, version=version)
+    return (
+        "Draft Release prepared by GitHub Actions.\n\n"
+        "Verify the attached assets and SHA-256 checksums before publishing.\n"
+        "human_action_required: publish_release\n"
+        f"\n{ATTRIBUTION_MARKER}\n{render_attribution_line(payload)}\n"
+    )
+
+
+def parse_attribution_body(body: str) -> dict[str, str]:
+    lines = body.splitlines()
+    try:
+        index = lines.index(ATTRIBUTION_MARKER)
+    except ValueError as exc:
+        raise DraftReleaseError("release attribution is missing") from exc
+    if index + 1 >= len(lines):
+        raise DraftReleaseError("release attribution is missing")
+    raw = lines[index + 1]
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DraftReleaseError("release attribution is invalid") from exc
+    expected = {"commit", "name", "schema", "tag", "version"}
+    if not isinstance(payload, dict) or set(payload) != expected:
+        raise DraftReleaseError("release attribution is invalid")
+    if payload.get("schema") != ATTRIBUTION_SCHEMA:
+        raise DraftReleaseError("release attribution is invalid")
+    commit = str(payload["commit"])
+    normalize_commit(commit)
+    if render_attribution_line({key: str(payload[key]) for key in sorted(payload)}) != raw:
+        raise DraftReleaseError("release attribution is not canonical")
+    return {key: str(payload[key]) for key in expected}
 
 
 def assert_package_version_matches_tag(package_version: str, tag: str) -> None:
@@ -189,12 +254,29 @@ def load_desired_assets(paths: Sequence[Path]) -> tuple[DesiredAsset, ...]:
 def plan_draft_release(
     existing: ExistingRelease | None,
     desired: Sequence[DesiredAsset],
+    *,
+    tag: str,
+    commit: str,
+    version: str,
 ) -> ReleasePlan:
     wanted = tuple(desired)
+    expected_name = expected_release_name(version)
+    current_commit = normalize_commit(commit)
+    parse_release_tag(tag)
     if existing is None:
         return ReleasePlan(action="create", uploads=wanted)
     if not existing.draft:
         raise DraftReleaseError("release is already published")
+    if existing.tag != tag:
+        raise DraftReleaseError(
+            f"release tag {existing.tag!r} does not match {tag!r}"
+        )
+    if existing.name != expected_name:
+        raise DraftReleaseError(
+            f"release name {existing.name!r} does not match {expected_name!r}"
+        )
+    if existing.commit != current_commit:
+        raise DraftReleaseError("moved tag")
     current = {asset.name: asset for asset in existing.assets}
     expected = {asset.name: asset for asset in wanted}
     extra = sorted(set(current) - set(expected))
@@ -286,21 +368,19 @@ class GitHubReleases:
             raise DraftReleaseError("GitHub release payload is invalid")
         return payload
 
-    def create_draft_release(self, *, tag: str, version: str) -> dict[str, Any]:
+    def create_draft_release(
+        self, *, tag: str, version: str, commit: str
+    ) -> dict[str, Any]:
         payload = self._request(
             "POST",
             f"{self._api_url}/repos/{self._repository}/releases",
             json_body={
                 "tag_name": tag,
-                "name": f"AEF {version}",
+                "name": expected_release_name(version),
                 "draft": True,
                 "prerelease": False,
                 "generate_release_notes": False,
-                "body": (
-                    "Draft Release prepared by GitHub Actions.\n\n"
-                    "Verify the attached assets and SHA-256 checksums before publishing.\n"
-                    "human_action_required: publish_release\n"
-                ),
+                "body": render_release_body(tag=tag, commit=commit, version=version),
             },
         )
         if not isinstance(payload, dict):
@@ -358,11 +438,20 @@ def existing_release_from_payload(
         assets.append(
             ExistingAsset(name=name, sha256=_asset_sha256(client, asset), size=size)
         )
+    attribution = parse_attribution_body(str(payload.get("body") or ""))
+    tag_name = str(payload.get("tag_name") or "")
+    name = str(payload.get("name") or "")
+    if attribution["tag"] != tag_name:
+        raise DraftReleaseError("release attribution does not match tag")
+    if attribution["name"] != name:
+        raise DraftReleaseError("release attribution does not match name")
     return ExistingRelease(
-        tag=str(payload.get("tag_name") or ""),
+        tag=tag_name,
+        name=name,
         draft=bool(payload.get("draft")),
         html_url=str(payload.get("html_url") or ""),
         release_id=int(payload.get("id")),
+        commit=normalize_commit(attribution["commit"]),
         assets=tuple(assets),
     )
 
@@ -372,13 +461,19 @@ def apply_draft_release(
     *,
     tag: str,
     version: str,
+    commit: str,
     desired: Sequence[DesiredAsset],
 ) -> tuple[ExistingRelease, ReleasePlan]:
+    current_commit = normalize_commit(commit)
     payload = client.get_release_by_tag(tag)
     existing = existing_release_from_payload(client, payload) if payload else None
-    plan = plan_draft_release(existing, desired)
+    plan = plan_draft_release(
+        existing, desired, tag=tag, commit=current_commit, version=version
+    )
     if plan.action == "create":
-        created = client.create_draft_release(tag=tag, version=version)
+        created = client.create_draft_release(
+            tag=tag, version=version, commit=current_commit
+        )
         existing = existing_release_from_payload(client, created)
         payload = created
     if existing is None:
@@ -458,8 +553,9 @@ def main(argv: list[str] | None = None) -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     try:
         parse_release_tag(args.tag)
+        current_commit = normalize_commit(args.commit)
         assert_package_version_matches_tag(args.package_version, args.tag)
-        assert_commit_is_on_main(args.commit, args.main_ref, cwd=args.cwd)
+        assert_commit_is_on_main(current_commit, args.main_ref, cwd=args.cwd)
         wheel, sdist = locate_release_artifacts(args.dist)
         wheel_version = version_from_wheel(wheel)
         assert_package_version_matches_tag(wheel_version, args.tag)
@@ -475,11 +571,12 @@ def main(argv: list[str] | None = None) -> int:
             client,
             tag=args.tag,
             version=args.package_version,
+            commit=current_commit,
             desired=desired,
         )
         summary = operator_summary(
             tag=args.tag,
-            commit=args.commit,
+            commit=current_commit,
             version=args.package_version,
             validations=validations,
             assets=desired,

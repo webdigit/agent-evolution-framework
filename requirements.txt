@@ -1,2 +1,3 @@
 pytest>=8,<9
 jsonschema>=4,<5
+-r requirements-release.txt
