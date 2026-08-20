@@ -17,20 +17,23 @@ def _wheel(path, *, schemas=SCHEMAS, extra=()):
             archive.writestr(name, "local")
 
 
-def _sdist(path):
+def _sdist(path, extra=()):
+    files = {
+        "agent-evolution-framework-0.1.0/README.md": b"README",
+        "agent-evolution-framework-0.1.0/pyproject.toml": b"[project]",
+        "agent-evolution-framework-0.1.0/docs/examples/connectors.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/reviews.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
+        **{
+            f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
+            for schema in SCHEMAS
+        },
+    }
+    for name in extra:
+        files[f"agent-evolution-framework-0.1.0/{name}"] = b"private"
     with tarfile.open(path, "w:gz") as archive:
-        for name, content in {
-            "agent-evolution-framework-0.1.0/README.md": b"README",
-            "agent-evolution-framework-0.1.0/pyproject.toml": b"[project]",
-            "agent-evolution-framework-0.1.0/docs/examples/connectors.json": b"{}",
-            "agent-evolution-framework-0.1.0/docs/examples/reviews.json": b"{}",
-            "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
-            "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
-            **{
-                f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
-                for schema in SCHEMAS
-            },
-        }.items():
+        for name, content in files.items():
             info = tarfile.TarInfo(name)
             info.size = len(content)
             archive.addfile(info, io.BytesIO(content))
@@ -69,3 +72,39 @@ def test_release_artifact_inspector_rejects_local_state(tmp_path, path):
     _wheel(wheel, extra=[path])
     with pytest.raises(ValueError, match="local or generated state"):
         inspect_artifact(wheel)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/prompts/README.md",
+        "_bmad/core/workflow.md",
+        "_bmad-output/status.yaml",
+        ".agents/skills/x.md",
+        ".env",
+        "credentials.json",
+    ],
+)
+def test_release_artifact_inspector_rejects_private_path_in_wheel(tmp_path, path):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=[path])
+    with pytest.raises(ValueError, match="private path"):
+        inspect_artifact(wheel)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/prompts/README.md",
+        "_bmad/core/workflow.md",
+        "_bmad-output/status.yaml",
+        ".agents/skills/x.md",
+        ".env",
+        "secrets.json",
+    ],
+)
+def test_release_artifact_inspector_rejects_private_path_in_sdist(tmp_path, path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(sdist, extra=[path])
+    with pytest.raises(ValueError, match="private path"):
+        inspect_artifact(sdist)
