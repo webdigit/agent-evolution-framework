@@ -21,6 +21,7 @@ SCHEMAS = {
     "record-submission.schema.json",
     "record.schema.json",
     "supervision.schema.json",
+    "upgrade-transaction.schema.json",
 }
 DOCUMENTATION_EXAMPLES = {
     "connectors.json", "reviews.json", "evaluation-decisions.json",

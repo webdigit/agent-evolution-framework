@@ -5,3 +5,9 @@ include SECURITY.md
 recursive-include docs *.md *.json
 prune docs/prompts
 recursive-exclude docs/prompts *
+prune _bmad
+prune _bmad-output
+prune .agents
+recursive-exclude _bmad *
+recursive-exclude _bmad-output *
+recursive-exclude .agents *

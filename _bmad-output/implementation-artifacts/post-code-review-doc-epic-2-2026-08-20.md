@@ -1,6 +1,6 @@
 # Post-documentation Epic 2 — 2026-08-20
 
-**Niveau :** épique (implémentation livrée).  
+**Niveau :** épique (implémentation livrée).
 **Version documentée (baseline, pas bump) :** AEF **1.1.2**.
 
 ## Adaptation AEF vs Siftbox
