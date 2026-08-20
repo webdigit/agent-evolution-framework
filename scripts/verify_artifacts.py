@@ -30,6 +30,20 @@ DOCUMENTATION_EXAMPLES = {
 FORBIDDEN_PARTS = {
     ".agent", ".venv", "__pycache__", ".pytest_cache", "build", "dist",
 }
+PRIVATE_PARTS = {
+    ".agent",
+    ".agents",
+    "_bmad",
+    "_bmad-output",
+}
+PRIVATE_PREFIXES = (
+    ("docs", "prompts"),
+)
+SECRET_OR_LOCAL_NAMES = {
+    ".env",
+    "credentials.json",
+    "secrets.json",
+}
 
 
 def _members(path: Path) -> list[str]:
@@ -42,11 +56,23 @@ def _members(path: Path) -> list[str]:
     raise ValueError(f"unsupported artifact: {path.name}")
 
 
+def _is_private_path(member: PurePosixPath) -> bool:
+    if PRIVATE_PARTS.intersection(member.parts):
+        return True
+    parts = member.parts
+    for index in range(len(parts) - 1):
+        if (parts[index], parts[index + 1]) in PRIVATE_PREFIXES:
+            return True
+    return member.name in SECRET_OR_LOCAL_NAMES
+
+
 def inspect_artifact(path: Path) -> dict[str, object]:
     members = _members(path)
     normalized = [PurePosixPath(member) for member in members]
     if any(FORBIDDEN_PARTS.intersection(member.parts) for member in normalized):
         raise ValueError(f"local or generated state found in {path.name}")
+    if any(_is_private_path(member) for member in normalized):
+        raise ValueError(f"private path found in {path.name}")
     schema_members = {
         member.name for member in normalized
         if tuple(member.parts[-3:-1]) == ("aef", "schemas")

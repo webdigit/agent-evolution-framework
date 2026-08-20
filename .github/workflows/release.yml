@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semantic tag to rebuild as a draft Release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  releases: write
+
+concurrency:
+  group: aef-draft-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-draft-release:
+    name: Prepare draft Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve and validate tag
+        id: tag
+        env:
+          RAW_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          if ! printf '%s' "$RAW_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "malformed release tag: $RAW_TAG" >&2
+            exit 1
+          fi
+          echo "name=$RAW_TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.name }}
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build verification tools
+        run: python -m pip install build twine check-wheel-contents
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Check package metadata
+        run: python -m twine check dist/*
+
+      - name: Check wheel structure
+        run: check-wheel-contents dist/*.whl
+
+      - name: Verify packaged schemas and exclusions
+        run: python scripts/verify_artifacts.py dist/*.whl dist/*.tar.gz
+
+      - name: Build wheel from sdist
+        shell: bash
+        run: |
+          sdist_root="$(mktemp -d)"
+          python -m pip wheel --no-deps --wheel-dir "$sdist_root" dist/*.tar.gz
+          python scripts/verify_artifacts.py "$sdist_root"/*.whl
+
+      - name: Isolated install and version check
+        id: version
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.name }}"
+          smoke_root="$(mktemp -d)"
+          python -m venv "$smoke_root/venv"
+          "$smoke_root/venv/bin/python" -m pip install dist/*.whl
+          cd "$smoke_root"
+          cli_version="$("$smoke_root/venv/bin/aef" --version)"
+          module_version="$("$smoke_root/venv/bin/python" -m aef --version)"
+          if [ "$cli_version" != "$module_version" ]; then
+            echo "entry points reported different versions" >&2
+            exit 1
+          fi
+          version="${cli_version#aef }"
+          expected="${tag#v}"
+          if [ "$version" != "$expected" ]; then
+            echo "package version $version does not match tag $tag" >&2
+            exit 1
+          fi
+          echo "package=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare draft Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/prepare_draft_release.py \
+            --tag "${{ steps.tag.outputs.name }}" \
+            --commit "$(git rev-parse HEAD)" \
+            --main-ref origin/main \
+            --package-version "${{ steps.version.outputs.package }}" \
+            --dist dist \
+            --repository "${{ github.repository }}" \
+            --validated tag_semver \
+            --validated tag_on_main \
+            --validated version_matches_tag \
+            --validated twine_check \
+            --validated wheel_contents \
+            --validated artifact_contract \
+            --validated sdist_rebuild \
+            --validated isolated_install
