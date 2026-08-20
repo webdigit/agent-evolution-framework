@@ -24,6 +24,7 @@ JSON_PATHS = {
     ".agent/knowledge/knowledge.json",
 }
 EVALUATION_TRANSACTION_PATH = ".agent/state/evaluation-transaction.json"
+UPGRADE_TRANSACTION_PATH = ".agent/state/upgrade-transaction.json"
 RECORDS_DIRECTORY = ".agent/records"
 
 WINDOWS_RESERVED_NAMES = {
@@ -41,6 +42,12 @@ class EvaluationRecoveryRequiredError(RuntimeError):
     """Raised when ordinary writes encounter an unfinished EVALUATE transaction."""
 
     code = "evaluation_recovery_required"
+
+
+class UpgradeRecoveryRequiredError(RuntimeError):
+    """Raised when ordinary writes encounter an unfinished UPGRADE transaction."""
+
+    code = "upgrade_recovery_required"
 
 
 TRANSACTION_BUSINESS_PATHS = frozenset({
@@ -182,6 +189,17 @@ def _evaluation_transaction_entry_present(root: Path) -> bool:
         raise EvaluationRecoveryRequiredError(
             "evaluation transaction entry cannot be inspected safely"
         ) from None
+    return True
+
+
+def _upgrade_transaction_entry_present(root: Path) -> bool:
+    path = root.joinpath(*UPGRADE_TRANSACTION_PATH.split("/"))
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
     return True
 
 
@@ -557,7 +575,7 @@ def apply_workspace(
     *,
     allow_delete: bool = False,
 ) -> dict[str, list[str]]:
-    """Apply an ordinary minimal diff unless EVALUATE recovery is required.
+    """Apply an ordinary minimal diff unless EVALUATE or UPGRADE recovery is required.
 
     The guard consults both the supplied snapshot and the real workspace so a
     stale or incomplete ``current`` object cannot bypass an unfinished
@@ -586,6 +604,14 @@ def apply_workspace(
     if _evaluation_transaction_entry_present(root):
         raise EvaluationRecoveryRequiredError(
             "evaluation recovery is required before workspace mutation"
+        )
+    if UPGRADE_TRANSACTION_PATH in current_files:
+        raise UpgradeRecoveryRequiredError(
+            "upgrade recovery is required before workspace mutation"
+        )
+    if _upgrade_transaction_entry_present(root):
+        raise UpgradeRecoveryRequiredError(
+            "upgrade recovery is required before workspace mutation"
         )
     return _apply_workspace_unchecked(
         root, current, desired, allow_delete=allow_delete
