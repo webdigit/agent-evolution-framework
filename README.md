@@ -119,6 +119,7 @@ The complete syntax, output modes, and exit codes are documented in
 - [Canonical input files](docs/input-files.md)
 - [Core concepts](docs/concepts.md)
 - [Evaluation recovery](docs/recovery.md)
+- [Release delivery](docs/release.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Release history](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)

@@ -72,6 +72,12 @@ aef integrate claude --remove
 The file is retained, even when empty. User content outside the segment remains
 unchanged.
 
+## A draft Release job failed
+
+Read [Release delivery](release.md). Do not move an existing tag, delete a
+divergent asset, or publish from a local checkout. Rerun the workflow for the
+same tag only when the intended assets are unchanged.
+
 ## Report a problem
 
 Use a repository issue for reproducible non-security defects. Send suspected

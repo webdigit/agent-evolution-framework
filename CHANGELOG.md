@@ -2,6 +2,13 @@
 
 All notable changes to AEF are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- GitHub Actions prepares a draft Release from a `vX.Y.Z` tag. Publication
+  remains a separate human decision.
+
 ## [1.1.0] - 2026-08-20
 
 ### Added
