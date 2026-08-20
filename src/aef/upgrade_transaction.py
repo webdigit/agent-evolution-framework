@@ -10,6 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .filesystem import WorkspacePathError, validate_workspace_rel_path
 from .strict_json import InvalidStrictJSONError, validate_strict_json
 from .upgrade_compat import UPGRADE_TRANSACTION_PATH
 
@@ -115,6 +116,7 @@ def validate_upgrade_transaction(journal: Any) -> dict[str, Any]:
         raise InvalidUpgradeTransactionError("invalid upgrade transaction paths")
     if not set(created).issubset(set(paths)):
         raise InvalidUpgradeTransactionError("invalid upgrade transaction created paths")
+    _validate_journal_paths(paths)
     file_paths = []
     for entry in files:
         if not isinstance(entry, dict) or set(entry) != FILE_FIELDS:
@@ -141,6 +143,23 @@ def validate_upgrade_transaction(journal: Any) -> dict[str, Any]:
     if journal["transaction_id"] != expected_id:
         raise InvalidUpgradeTransactionError("invalid upgrade transaction identity")
     return journal
+
+
+def _validate_journal_paths(paths: list[str]) -> None:
+    folded: dict[str, str] = {}
+    journal_key = UPGRADE_TRANSACTION_PATH.casefold()
+    for path in paths:
+        try:
+            validate_workspace_rel_path(path)
+        except WorkspacePathError as exc:
+            raise InvalidUpgradeTransactionError("invalid upgrade transaction path") from exc
+        key = path.casefold()
+        if key == journal_key:
+            raise InvalidUpgradeTransactionError("invalid upgrade transaction path")
+        previous = folded.get(key)
+        if previous is not None and previous != path:
+            raise InvalidUpgradeTransactionError("invalid upgrade transaction paths")
+        folded[key] = path
 
 
 def compute_transaction_id(journal: dict[str, Any]) -> str:

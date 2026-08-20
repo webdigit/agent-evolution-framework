@@ -284,8 +284,11 @@ def is_link_or_reparse_point(path: Path) -> bool:
 _is_link_or_reparse_point = is_link_or_reparse_point
 
 
-def _validate_workspace_path(root: Path, rel_path: str) -> Path:
-    """Validate one canonical POSIX file path confined below ``.agent/``."""
+def validate_workspace_rel_path(rel_path: str) -> tuple[str, ...]:
+    """Validate one canonical POSIX relative path confined below ``.agent/``.
+
+    Syntax only: no filesystem access. Returns the POSIX parts.
+    """
     if not isinstance(rel_path, str) or not rel_path:
         raise WorkspacePathError("workspace paths must be non-empty strings")
     if "\\" in rel_path:
@@ -307,7 +310,12 @@ def _validate_workspace_path(root: Path, rel_path: str) -> Path:
             raise WorkspacePathError(f"Windows-trimmed path components are forbidden: {rel_path!r}")
         if part.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
             raise WorkspacePathError(f"Windows reserved path component is forbidden: {rel_path!r}")
+    return tuple(parts)
 
+
+def _validate_workspace_path(root: Path, rel_path: str) -> Path:
+    """Validate one canonical POSIX file path confined below ``.agent/``."""
+    parts = validate_workspace_rel_path(rel_path)
     target = root.joinpath(*parts)
     cursor = root
     for part in parts:

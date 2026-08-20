@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from copy import deepcopy
@@ -12,13 +13,16 @@ from .filesystem import (
     EVALUATION_TRANSACTION_PATH,
     WorkspacePathError,
     _apply_workspace_unchecked,
+    _validate_workspace_path,
     is_link_or_reparse_point,
     load_workspace,
 )
+from .init_profiles import get_init_profile
 from .transaction_guard import evaluation_recovery_required
 from .upgrade_compat import (
     LEDGER_PATH,
     MANIFEST_PATH,
+    SUPPORTED_PROFILE,
     TARGET_WORKSPACE_SCHEMA_VERSION,
     UPGRADE_TRANSACTION_PATH,
     installed_package_version,
@@ -75,9 +79,25 @@ def _empty_result(**overrides: Any) -> dict[str, Any]:
 
 def _manifest(project: dict[str, Any]) -> dict[str, Any] | None:
     manifest = project.get("files", {}).get(MANIFEST_PATH)
-    if isinstance(manifest, dict) and manifest.get("framework") == "aef":
-        return manifest
-    return None
+    if not isinstance(manifest, dict) or manifest.get("framework") != "aef":
+        return None
+    instance_id = manifest.get("instance_id")
+    schema_version = manifest.get("schema_version")
+    if not isinstance(instance_id, str) or not instance_id:
+        return None
+    if not isinstance(schema_version, str) or not schema_version:
+        return None
+    return manifest
+
+
+def _profile_compatible(manifest: dict[str, Any]) -> bool:
+    profile = get_init_profile(SUPPORTED_PROFILE)
+    if manifest.get("framework") != profile["framework"]:
+        return False
+    if manifest.get("framework_version") != profile["framework_version"]:
+        return False
+    declared = manifest.get("profile")
+    return declared is None or declared == SUPPORTED_PROFILE
 
 
 def _refuse_unsafe_root(root: Path) -> None:
@@ -108,7 +128,10 @@ def _file_content(value: Any) -> str:
 
 
 def _observe_file(root: Path, rel: str) -> str | None:
-    path = root.joinpath(*rel.split("/"))
+    try:
+        path = _validate_workspace_path(root, rel)
+    except WorkspacePathError as exc:
+        raise UpgradeBlocked("workspace_path_unsafe") from exc
     try:
         os.lstat(path)
     except FileNotFoundError:
@@ -121,7 +144,6 @@ def _observe_file(root: Path, rel: str) -> str | None:
 def _preflight_paths(root: Path, paths: list[str], current_files: dict[str, Any]) -> None:
     for rel in paths:
         try:
-            from .filesystem import _validate_workspace_path
             target = _validate_workspace_path(root, rel)
         except WorkspacePathError as exc:
             raise UpgradeBlocked("workspace_path_unsafe") from exc
@@ -180,6 +202,11 @@ def _project_plan(
     target = TARGET_WORKSPACE_SCHEMA_VERSION
     if manifest is None:
         return plan_upgrade(None, target_schema_version=target, migrations=migrations)
+    if not _profile_compatible(manifest):
+        return UpgradePlan(
+            "BLOCKED", "incompatible_profile",
+            manifest.get("schema_version"), target, (),
+        )
     ledger = default_ledger(project)
     return plan_upgrade(
         manifest.get("schema_version"),
@@ -393,6 +420,63 @@ def _apply_transaction(
     return "CHANGE", result, extra
 
 
+def _embedded_schema(content: str) -> str | None:
+    if not content:
+        return None
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    version = parsed.get("schema_version")
+    return version if isinstance(version, str) and version else None
+
+
+def _journal_binding_reasons(
+    journal: dict[str, Any], project: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    manifest = _manifest(project)
+    if manifest is None:
+        return ["invalid_workspace_manifest"]
+    if journal["workspace_instance_id"] != manifest["instance_id"]:
+        reasons.append("upgrade_workspace_mismatch")
+    observed = manifest.get("schema_version")
+    from_version = journal["from_schema_version"]
+    to_version = journal["to_schema_version"]
+    if observed not in {from_version, to_version}:
+        reasons.append("upgrade_version_mismatch")
+    for entry in journal["files"]:
+        if entry["path"] != MANIFEST_PATH:
+            continue
+        before = _embedded_schema(entry["before_content"])
+        after = _embedded_schema(entry["after_content"])
+        if entry["path"] not in journal["created_paths"] and before not in {None, from_version}:
+            if "upgrade_version_mismatch" not in reasons:
+                reasons.append("upgrade_version_mismatch")
+        if after not in {None, to_version}:
+            if "upgrade_version_mismatch" not in reasons:
+                reasons.append("upgrade_version_mismatch")
+    return reasons
+
+
+def _blocked_recover(
+    project: dict[str, Any],
+    extra: dict[str, Any],
+    reason: str,
+    *,
+    journal: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    extra["reason"] = reason
+    extra["meta"] = {"reason": reason}
+    return "BLOCKED", _machine(
+        project, None, compatibility="blocked",
+        transaction_id=None if journal is None else journal.get("transaction_id"),
+        recovery_action="inspect", human_action_required=True,
+    ), extra
+
+
 def _recover(
     root: Path, project: dict[str, Any], *, dry_run: bool,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
@@ -407,24 +491,18 @@ def _recover(
     try:
         journal = validate_upgrade_transaction(raw)
     except (InvalidUpgradeTransactionError, TypeError, ValueError):
-        extra["reason"] = "invalid_upgrade_transaction"
-        extra["meta"] = {"reason": "invalid_upgrade_transaction"}
-        return "BLOCKED", _machine(
-            project, None, compatibility="blocked",
-            recovery_action="inspect", human_action_required=True,
-        ), extra
+        return _blocked_recover(project, extra, "invalid_upgrade_transaction")
+
+    binding = _journal_binding_reasons(journal, project)
+    if binding:
+        return _blocked_recover(project, extra, binding[0], journal=journal)
 
     observations = {}
     for entry in journal["files"]:
         try:
             observations[entry["path"]] = _observe_file(root, entry["path"])
         except UpgradeBlocked as exc:
-            extra["reason"] = exc.reason
-            extra["meta"] = {"reason": exc.reason}
-            return "BLOCKED", _machine(
-                project, None, compatibility="blocked",
-                recovery_action="inspect", human_action_required=True,
-            ), extra
+            return _blocked_recover(project, extra, exc.reason, journal=journal)
 
     before_ok = all(
         (observations[entry["path"]] is None and entry["path"] in journal["created_paths"])
@@ -440,18 +518,14 @@ def _recover(
         for entry in journal["files"]
     )
     action = None
-    if journal["phase"] == "prepared" and before_ok:
+    if journal["phase"] == "prepared" and (before_ok or after_ok):
         action = "rollback"
     elif journal["phase"] == "committed" and after_ok:
         action = "finalize"
     else:
-        extra["reason"] = "upgrade_transaction_inconsistent"
-        extra["meta"] = {"reason": "upgrade_transaction_inconsistent"}
-        return "BLOCKED", _machine(
-            project, None, compatibility="blocked",
-            transaction_id=journal["transaction_id"],
-            recovery_action="inspect", human_action_required=True,
-        ), extra
+        return _blocked_recover(
+            project, extra, "upgrade_transaction_inconsistent", journal=journal,
+        )
 
     result = _machine(
         project, None, compatibility="blocked",
@@ -512,22 +586,33 @@ def audit_upgrade_findings(project: dict[str, Any], root: str | Path | None = No
         findings.append({"id": "upgrade-journal-malformed", "severity": "error"})
         return findings
 
-    if root is not None:
-        before_hits = 0
-        after_hits = 0
-        for entry in journal["files"]:
-            path = Path(root).joinpath(*entry["path"].split("/"))
-            if not path.exists():
-                if entry["path"] in journal["created_paths"]:
-                    before_hits += 1
-                continue
-            digest = sha256_text(path.read_text(encoding="utf-8"))
-            if digest == entry["before_hash"]:
+    for reason in _journal_binding_reasons(journal, project):
+        findings.append({
+            "id": reason.replace("_", "-"),
+            "severity": "error",
+        })
+
+    if root is None:
+        return findings
+    before_hits = 0
+    after_hits = 0
+    for entry in journal["files"]:
+        try:
+            observed = _observe_file(Path(root), entry["path"])
+        except UpgradeBlocked:
+            findings.append({"id": "upgrade-path-unsafe", "severity": "error"})
+            continue
+        if observed is None:
+            if entry["path"] in journal["created_paths"]:
                 before_hits += 1
-            elif digest == entry["after_hash"]:
-                after_hits += 1
-            else:
-                findings.append({"id": "upgrade-hash-mismatch", "severity": "error"})
-        if before_hits and after_hits:
-            findings.append({"id": "upgrade-partial-state", "severity": "error"})
+            continue
+        digest = sha256_text(observed)
+        if digest == entry["before_hash"]:
+            before_hits += 1
+        elif digest == entry["after_hash"]:
+            after_hits += 1
+        else:
+            findings.append({"id": "upgrade-hash-mismatch", "severity": "error"})
+    if before_hits and after_hits:
+        findings.append({"id": "upgrade-partial-state", "severity": "error"})
     return findings

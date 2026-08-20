@@ -60,6 +60,10 @@ aef upgrade --recover
 aef audit
 ```
 
-`prepared` and compatible before-states roll back. `committed` with exact
-after-states finalizes. An invalid journal or divergent hash is `BLOCKED`
-without writing. Repeating recover after success is safe.
+`prepared` plus an all-before or all-after disk state rolls back to the
+recorded before-states. `committed` with exact after-states finalizes.
+A mixed before/after set, an unknown hash, a journal bound to another
+workspace, or a source/target version that does not match the current
+manifest is `BLOCKED` without writing. Journal paths must be canonical
+POSIX files under `.agent/`; recovery never follows a traversal.
+Repeating recover after success is safe.
