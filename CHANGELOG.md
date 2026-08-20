@@ -4,6 +4,8 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-20
+
 ### Fixed
 
 - Draft Release lookup no longer treats GitHub's tag-endpoint 404 as a
@@ -85,3 +87,4 @@ Initial public V1 release.
 [1.0.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.0...v1.0.1
 [1.1.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.0.1...v1.1.0
 [1.1.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.0...v1.1.1
+[1.1.2]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.1...v1.1.2
