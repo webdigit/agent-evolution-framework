@@ -1,0 +1,33 @@
+HEAD=5d4b3d0dd4242f25a9603ad18df47a104d1beac5
+version_py="""Single source of truth for the AEF distribution version."""
+
+__version__ = "1.2.0"
+
+changelog_head=# Changelog
+
+All notable changes to AEF are documented in this file.
+
+## [Unreleased]
+
+## [1.2.0] - 2026-08-20
+
+### Added
+
+- UPGRADE V1.x migrates the project-local workspace toward the contract of
+  the already installed package via `aef upgrade --check`, `--dry-run`,
+  apply, `--recover --dry-run`, and `--recover`.
+- A dedicated journal at `.agent/state/upgrade-transaction.json`
+  (`aef.upgrade-transaction/v1`) protects that mutation. It is distinct
+  from the EVALUATE journal.
+- AUDIT reports `upgrade-recovery-required`, and distinct findings when a
+  journal is bound to another workspace or to divergent schema versions.
+
+### Documentation
+
+- UPGRADE command forms and recovery: journal confinement under `.agent/`,
+  workspace identity binding, and rollback of `prepared` plus an all-after
+  disk state.
+
+
+pyproject=dynamic = ["version"]
+version = {attr = "aef._version.__version__"}

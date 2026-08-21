@@ -1,0 +1,29 @@
+{"event": "e3-runtime-present", "ok": true, "exit": 0}
+{"event": "e3-install-required", "ok": true, "exit": 8}
+{"event": "e3-consent-refused", "ok": true, "exit": 0}
+{"event": "e3-incompatible-preserved", "ok": true, "exit": 0}
+{"event": "e3-isolated-install", "ok": true, "exit": 0}
+{"event": "e3-symlink-outside-blocked", "ok": true, "exit": null}
+{"event": "e4-dry-run", "ok": true, "exit": 0}
+{"event": "e4-first-apply", "ok": true, "exit": 0}
+{"event": "e4-replay", "ok": true, "exit": 0}
+{"event": "e4-conflict", "ok": true, "exit": 4}
+{"event": "e4-audit", "ok": true, "exit": 0}
+{"event": "e5-dry-run", "ok": true, "exit": 0}
+{"event": "e5-apply", "ok": true, "exit": 0}
+{"event": "e5-replay", "ok": true, "exit": 0}
+{"event": "e5-conflict", "ok": true, "exit": 4}
+{"event": "e5-recover", "ok": true, "exit": 0}
+{"event": "e5-audit", "ok": true, "exit": 0}
+{"event": "e6-dry-run", "ok": true, "exit": 0}
+{"event": "e6-install-bridge", "ok": true, "exit": 0}
+{"event": "e6-replay", "ok": true, "exit": 0}
+{"event": "e6-user-preserved", "ok": true, "exit": 0}
+{"event": "e6-marker-conflict", "ok": true, "exit": 4}
+{"event": "e6-status-check", "ok": true, "exit": 0}
+{"event": "e6-audit", "ok": true, "exit": 0}
+{
+  "ok": true,
+  "total": 24,
+  "failed": []
+}

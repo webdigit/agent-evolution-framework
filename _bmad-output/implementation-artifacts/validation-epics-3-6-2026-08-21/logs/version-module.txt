@@ -1,0 +1,3 @@
+cli_version_module 1.2.0
+cli_path <TEMP>/aef-epics-3-6-validation\venv-u5\Lib\site-packages\aef\cli.py
+OUTSIDE_CHECKOUT_OK

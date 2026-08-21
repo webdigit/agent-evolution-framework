@@ -1,0 +1,14 @@
+_version.py:
+"""Single source of truth for the AEF distribution version."""
+
+__version__ = "1.2.0"
+
+CHANGELOG tops:
+## [Unreleased]
+## [1.2.0] - 2026-08-20
+## [1.1.2] - 2026-08-20
+
+pyproject:
+version = {attr = "aef._version.__version__"}
+
+git_diff_version_files:

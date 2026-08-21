@@ -1,0 +1,7 @@
+Processing .\_bmad-output\implementation-artifacts\validation-epics-3-6-2026-08-21\dist\repro\agent_evolution_framework-1.2.0-py3-none-any.whl
+Installing collected packages: agent-evolution-framework
+  Attempting uninstall: agent-evolution-framework
+    Found existing installation: agent-evolution-framework 1.2.0
+    Not uninstalling agent-evolution-framework at <REPO>\src, outside environment <TEMP>/aef-epics-3-6-validation\venv-clean
+    Can't uninstall 'agent-evolution-framework'. No files were found to uninstall.
+Successfully installed agent-evolution-framework-1.2.0

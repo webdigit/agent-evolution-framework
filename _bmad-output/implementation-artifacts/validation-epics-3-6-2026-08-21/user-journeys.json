@@ -1,0 +1,967 @@
+{
+  "journeys": [
+    {
+      "name": "e3-runtime-present",
+      "ok": true,
+      "exit": 0,
+      "decision": "PASS",
+      "result": {
+        "architecture": "amd64",
+        "decision": "OK",
+        "discovery_method": "path",
+        "expected_package_version": null,
+        "found_package_version": "1.2.0",
+        "human_action_required": false,
+        "install_command": "",
+        "interpreter": "CPython-3.13.15",
+        "local_artifact": "absent",
+        "network_required": false,
+        "platform": "windows",
+        "venv_status": "absent",
+        "workspace_compatible": false
+      },
+      "fingerprint_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "fingerprint_after": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mutated": false,
+      "stderr": "",
+      "exterior_ok": true
+    },
+    {
+      "name": "e3-install-required",
+      "ok": true,
+      "exit": 8,
+      "decision": "INSTALL_REQUIRED",
+      "result": {
+        "architecture": "x86_64",
+        "decision": "INSTALL_REQUIRED",
+        "discovery_method": "none",
+        "expected_package_version": "1.2.0",
+        "found_package_version": null,
+        "human_action_required": true,
+        "install_command": "python -m venv .aef-venv",
+        "interpreter": "CPython",
+        "local_artifact": "absent",
+        "network_required": true,
+        "platform": "windows",
+        "venv_status": "absent",
+        "workspace_compatible": false
+      },
+      "fingerprint_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "fingerprint_after": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mutated": false,
+      "note": "discovery hook via installed package",
+      "exterior_ok": true
+    },
+    {
+      "name": "e3-consent-refused",
+      "ok": true,
+      "exit": 0,
+      "body": {
+        "ok": true,
+        "refused": true,
+        "message": "install requires explicit --install consent"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e3-incompatible-preserved",
+      "ok": true,
+      "exit": 0,
+      "decision": "PASS",
+      "result": {
+        "architecture": "amd64",
+        "decision": "OK",
+        "discovery_method": "path",
+        "expected_package_version": null,
+        "found_package_version": "1.2.0",
+        "human_action_required": false,
+        "install_command": "",
+        "interpreter": "CPython-3.13.15",
+        "local_artifact": "absent",
+        "network_required": false,
+        "platform": "windows",
+        "venv_status": "incompatible",
+        "workspace_compatible": false
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e3-isolated-install",
+      "ok": true,
+      "exit": 0,
+      "body": {
+        "ok": true,
+        "result": {
+          "changed": true,
+          "env_path": "<TEMP>/aef-epics-3-6-validation\\journeys\\epic3\\install-isolated\\.aef-venv",
+          "python": "<TEMP>/aef-epics-3-6-validation\\journeys\\epic3\\install-isolated\\.aef-venv\\Scripts\\python.exe",
+          "diagnosis": {
+            "platform": "windows",
+            "architecture": "amd64",
+            "interpreter": "CPython-3.13.15",
+            "discovery_method": "none",
+            "found_package_version": null,
+            "expected_package_version": null,
+            "workspace_compatible": false,
+            "venv_status": "absent",
+            "network_required": false,
+            "local_artifact": "available",
+            "human_action_required": true,
+            "install_command": "py -3.11 -m venv \".aef-venv\" && \".aef-venv\\Scripts\\python.exe\" -m pip install --no-index \"agent_evolution_framework-1.2.0-py3-none-any.whl\"",
+            "decision": "INSTALL_REQUIRED"
+          },
+          "created_env": true
+        }
+      },
+      "fingerprint_before": "6adfc33f25669eca6618e6930bc346fb231075899f1418258e5c00feab511365",
+      "fingerprint_after": "a5dde4a3e6fd36e8cb335ad96994abd1e7ce29ba6b3c8e247dec9d2c7abfe2d1",
+      "exterior_ok": true,
+      "note": "consented install from local wheel; deps may use pip cache under explicit consent"
+    },
+    {
+      "name": "e3-symlink-outside-blocked",
+      "ok": true,
+      "skipped": true,
+      "reason": "[WinError 1314] Le client ne dispose pas d’un privilège nécessaire: '<TEMP>/aef-epics-3-6-validation\\\\journeys\\\\epic3\\\\outside-target' -> '<TEMP>/aef-epics-3-6-validation\\\\journeys\\\\epic3\\\\symlink-block\\\\.venv'"
+    },
+    {
+      "name": "e4-dry-run",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INGEST",
+        "diff": {
+          "created": [],
+          "modified": [
+            ".agent/knowledge/knowledge.json"
+          ],
+          "removed": []
+        },
+        "dry_run": true,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "events_accepted": 1,
+          "human_action_required": false,
+          "knowledge_path": ".agent/knowledge/knowledge.json",
+          "projected": {
+            "hypotheses": [],
+            "observations": [
+              "observation:signal:novelty:init-dry-run"
+            ],
+            "signals": [
+              "signal:novelty:init-dry-run"
+            ]
+          },
+          "records": [
+            "session-alpha"
+          ]
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic4/project"
+      },
+      "fingerprint_before": "433646af2b7f5e38beeef8d37d6508256cfc7c7a87544f671220b8fe954a1e73",
+      "fingerprint_after": "433646af2b7f5e38beeef8d37d6508256cfc7c7a87544f671220b8fe954a1e73",
+      "exterior_ok": true
+    },
+    {
+      "name": "e4-first-apply",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INGEST",
+        "diff": {
+          "created": [],
+          "modified": [
+            ".agent/knowledge/knowledge.json"
+          ],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "events_accepted": 1,
+          "human_action_required": false,
+          "knowledge_path": ".agent/knowledge/knowledge.json",
+          "projected": {
+            "hypotheses": [],
+            "observations": [
+              "observation:signal:novelty:init-dry-run"
+            ],
+            "signals": [
+              "signal:novelty:init-dry-run"
+            ]
+          },
+          "records": [
+            "session-alpha"
+          ]
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic4/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e4-replay",
+      "ok": true,
+      "exit": 0,
+      "decision": "NO_CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INGEST",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "events_accepted": 1,
+          "human_action_required": false,
+          "knowledge_path": ".agent/knowledge/knowledge.json",
+          "projected": {
+            "hypotheses": [],
+            "observations": [
+              "observation:signal:novelty:init-dry-run"
+            ],
+            "signals": [
+              "signal:novelty:init-dry-run"
+            ]
+          },
+          "records": [
+            "session-alpha"
+          ]
+        },
+        "status": "NO_CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic4/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e4-conflict",
+      "ok": true,
+      "exit": 4,
+      "decision": "BLOCKED",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INGEST",
+        "diff": null,
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "details": {
+            "record_id": "session-alpha"
+          },
+          "reason": "record_digest_mismatch"
+        },
+        "ok": false,
+        "result": {},
+        "status": "BLOCKED",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic4/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e4-audit",
+      "ok": true,
+      "exit": 0,
+      "decision": "PASS",
+      "finding_ids": [],
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "AUDIT",
+        "diff": null,
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "findings": [],
+          "schema_version": "1.0.0"
+        },
+        "status": "PASS",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic4/project"
+      },
+      "exterior_ok": true,
+      "no_network_implicit": true
+    },
+    {
+      "name": "e5-dry-run",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "COMPETENCY_DECLARE",
+        "diff": {
+          "created": [
+            ".agent/state/competency-declarations.json"
+          ],
+          "modified": [
+            ".agent/state/competencies.json"
+          ],
+          "removed": []
+        },
+        "dry_run": true,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "competencies_path": ".agent/state/competencies.json",
+          "competency_id": "dry-run-review",
+          "human_action_required": false,
+          "ledger_path": ".agent/state/competency-declarations.json",
+          "projected": {
+            "cases": 0,
+            "complex_cases": 0,
+            "id": "dry-run-review",
+            "level": "L1",
+            "probation": false,
+            "recent_significant_errors": 0,
+            "source": "declared",
+            "title": "Dry-run review",
+            "trust": null,
+            "xp": 0
+          },
+          "records": [
+            {
+              "digest": "sha256:addd6ad5eedf4a6eb101b3f5032a2225366e299e1ec65e48bbc31bf11c839487",
+              "record_id": "session-alpha"
+            }
+          ]
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/project"
+      },
+      "fingerprint_before": "433646af2b7f5e38beeef8d37d6508256cfc7c7a87544f671220b8fe954a1e73",
+      "fingerprint_after": "433646af2b7f5e38beeef8d37d6508256cfc7c7a87544f671220b8fe954a1e73",
+      "exterior_ok": true
+    },
+    {
+      "name": "e5-apply",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "COMPETENCY_DECLARE",
+        "diff": {
+          "created": [
+            ".agent/state/competency-declarations.json"
+          ],
+          "modified": [
+            ".agent/state/competencies.json"
+          ],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "competencies_path": ".agent/state/competencies.json",
+          "competency_id": "dry-run-review",
+          "human_action_required": false,
+          "ledger_path": ".agent/state/competency-declarations.json",
+          "projected": {
+            "cases": 0,
+            "complex_cases": 0,
+            "id": "dry-run-review",
+            "level": "L1",
+            "probation": false,
+            "recent_significant_errors": 0,
+            "source": "declared",
+            "title": "Dry-run review",
+            "trust": null,
+            "xp": 0
+          },
+          "records": [
+            {
+              "digest": "sha256:addd6ad5eedf4a6eb101b3f5032a2225366e299e1ec65e48bbc31bf11c839487",
+              "record_id": "session-alpha"
+            }
+          ]
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/project"
+      },
+      "no_invented_xp_level_permission": true,
+      "exterior_ok": true
+    },
+    {
+      "name": "e5-replay",
+      "ok": true,
+      "exit": 0,
+      "decision": "NO_CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "COMPETENCY_DECLARE",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "competencies_path": ".agent/state/competencies.json",
+          "competency_id": "dry-run-review",
+          "human_action_required": false,
+          "ledger_path": ".agent/state/competency-declarations.json",
+          "projected": {
+            "cases": 0,
+            "complex_cases": 0,
+            "id": "dry-run-review",
+            "level": "L1",
+            "probation": false,
+            "recent_significant_errors": 0,
+            "source": "declared",
+            "title": "Dry-run review",
+            "trust": null,
+            "xp": 0
+          },
+          "records": [
+            {
+              "digest": "sha256:addd6ad5eedf4a6eb101b3f5032a2225366e299e1ec65e48bbc31bf11c839487",
+              "record_id": "session-alpha"
+            }
+          ]
+        },
+        "status": "NO_CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e5-conflict",
+      "ok": true,
+      "exit": 4,
+      "decision": "BLOCKED",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "COMPETENCY_DECLARE",
+        "diff": null,
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "details": {
+            "competency_id": "DRY-RUN-REVIEW",
+            "existing_id": "dry-run-review"
+          },
+          "reason": "competency_id_collision"
+        },
+        "ok": false,
+        "result": {},
+        "status": "BLOCKED",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e5-recover",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "COMPETENCY_DECLARE",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": [
+            ".agent/state/competency-declaration-transaction.json"
+          ]
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "human_action_required": false,
+          "recovery_action": "rollback",
+          "transaction_id": "competency-declaration-transaction:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/recover"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e5-audit",
+      "ok": true,
+      "exit": 0,
+      "decision": "PASS",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "AUDIT",
+        "diff": null,
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "findings": [],
+          "schema_version": "1.0.0"
+        },
+        "status": "PASS",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic5/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-dry-run",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INTEGRATE",
+        "diff": {
+          "created": [
+            "AGENTS.md"
+          ],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": true,
+        "error": null,
+        "meta": {
+          "bridge": {
+            "end": null,
+            "start": null,
+            "state": "absent",
+            "version": null
+          },
+          "bridge_path": "AGENTS.md",
+          "doctrine_files": 5,
+          "door": "agents",
+          "enforcement": "guidance_only",
+          "integration_version": "1.0.0",
+          "reason": null,
+          "scope": "project",
+          "workspace_reason": null
+        },
+        "ok": true,
+        "result": {
+          "action": "install",
+          "audit": null,
+          "bridge_healthy": true,
+          "doctrine_files": 5,
+          "doors": {
+            "agents": {
+              "bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "installed": true,
+              "legacy_bridge": null,
+              "path": "AGENTS.md",
+              "reason": null,
+              "status": "CHANGE"
+            }
+          },
+          "enforcement": "guidance_only",
+          "installed": true,
+          "integration": "agents",
+          "pending_reviews": null,
+          "scope": "project",
+          "status_only": false,
+          "warnings": [],
+          "workspace_compatible": true
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/project"
+      },
+      "fingerprint_before": "7512f837c7d407e935730965a6324fdf70f131151207abc033b9c54028937b1c",
+      "fingerprint_after": "7512f837c7d407e935730965a6324fdf70f131151207abc033b9c54028937b1c",
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-install-bridge",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INTEGRATE",
+        "diff": {
+          "created": [
+            "AGENTS.md",
+            "CLAUDE.md",
+            "GEMINI.md"
+          ],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "bridge": {
+            "end": null,
+            "start": null,
+            "state": "absent",
+            "version": null
+          },
+          "bridge_path": "GEMINI.md",
+          "doctrine_files": 5,
+          "door": "gemini",
+          "enforcement": "guidance_only",
+          "integration_version": "1.0.0",
+          "reason": null,
+          "scope": "project",
+          "workspace_reason": null
+        },
+        "ok": true,
+        "result": {
+          "action": "install",
+          "audit": null,
+          "bridge_healthy": true,
+          "doctrine_files": 5,
+          "doors": {
+            "agents": {
+              "bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "co_installed": true,
+              "installed": true,
+              "path": "AGENTS.md",
+              "status": "CHANGE"
+            },
+            "claude": {
+              "bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "installed": true,
+              "legacy_bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "path": "CLAUDE.md",
+              "reason": null,
+              "status": "CHANGE"
+            },
+            "gemini": {
+              "bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "installed": true,
+              "legacy_bridge": null,
+              "path": "GEMINI.md",
+              "reason": null,
+              "status": "CHANGE"
+            }
+          },
+          "enforcement": "guidance_only",
+          "installed": true,
+          "integration": "all",
+          "pending_reviews": null,
+          "scope": "project",
+          "status_only": false,
+          "warnings": [],
+          "workspace_compatible": true
+        },
+        "status": "CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-replay",
+      "ok": true,
+      "exit": 0,
+      "decision": "NO_CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INTEGRATE",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "bridge": {
+            "end": 146,
+            "start": 0,
+            "state": "installed",
+            "version": "1.0.0"
+          },
+          "bridge_path": "GEMINI.md",
+          "doctrine_files": 5,
+          "door": "gemini",
+          "enforcement": "guidance_only",
+          "integration_version": "1.0.0",
+          "reason": null,
+          "scope": "project",
+          "workspace_reason": null
+        },
+        "ok": true,
+        "result": {
+          "action": "install",
+          "audit": null,
+          "bridge_healthy": true,
+          "doctrine_files": 5,
+          "doors": {
+            "agents": {
+              "bridge": {
+                "end": 526,
+                "start": 0,
+                "state": "installed",
+                "version": "1.0.0"
+              },
+              "installed": true,
+              "legacy_bridge": null,
+              "path": "AGENTS.md",
+              "reason": null,
+              "status": "NO_CHANGE"
+            },
+            "claude": {
+              "bridge": {
+                "end": 87,
+                "start": 0,
+                "state": "installed",
+                "version": "1.0.0"
+              },
+              "installed": true,
+              "legacy_bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "path": "CLAUDE.md",
+              "reason": null,
+              "status": "NO_CHANGE"
+            },
+            "gemini": {
+              "bridge": {
+                "end": 146,
+                "start": 0,
+                "state": "installed",
+                "version": "1.0.0"
+              },
+              "installed": true,
+              "legacy_bridge": null,
+              "path": "GEMINI.md",
+              "reason": null,
+              "status": "NO_CHANGE"
+            }
+          },
+          "enforcement": "guidance_only",
+          "installed": true,
+          "integration": "all",
+          "pending_reviews": null,
+          "scope": "project",
+          "status_only": false,
+          "warnings": [],
+          "workspace_compatible": true
+        },
+        "status": "NO_CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-user-preserved",
+      "ok": true,
+      "exit": 0,
+      "decision": "CHANGE",
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-marker-conflict",
+      "ok": true,
+      "exit": 4,
+      "decision": "BLOCKED",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INTEGRATE",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "bridge": {
+            "end": 522,
+            "start": 0,
+            "state": "modified",
+            "version": "1.0.0"
+          },
+          "doctrine_files": 0,
+          "door": "agents",
+          "enforcement": "guidance_only",
+          "integration_version": null,
+          "reason": "modified_agents_managed_block",
+          "scope": "project"
+        },
+        "ok": false,
+        "result": {
+          "action": "install",
+          "audit": null,
+          "bridge_healthy": false,
+          "doctrine_files": 0,
+          "doors": {
+            "agents": {
+              "bridge": {
+                "end": 522,
+                "start": 0,
+                "state": "modified",
+                "version": "1.0.0"
+              },
+              "installed": false,
+              "legacy_bridge": null,
+              "path": "AGENTS.md",
+              "reason": "modified_agents_managed_block",
+              "status": "BLOCKED"
+            }
+          },
+          "enforcement": "guidance_only",
+          "installed": false,
+          "integration": "agents",
+          "pending_reviews": null,
+          "scope": "project",
+          "status_only": false,
+          "warnings": [],
+          "workspace_compatible": false
+        },
+        "status": "BLOCKED",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/drift"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-status-check",
+      "ok": true,
+      "exit": 0,
+      "decision": "NO_CHANGE",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "INTEGRATE",
+        "diff": {
+          "created": [],
+          "modified": [],
+          "removed": []
+        },
+        "dry_run": false,
+        "error": null,
+        "meta": {
+          "bridge": {
+            "end": 87,
+            "start": 0,
+            "state": "installed",
+            "version": "1.0.0"
+          },
+          "bridge_healthy": true,
+          "bridge_path": "CLAUDE.md",
+          "doctrine_files": 5,
+          "door": "claude",
+          "enforcement": "guidance_only",
+          "installed_via": "doorbell",
+          "integration_version": "1.0.0",
+          "legacy_bridge": {
+            "end": null,
+            "start": null,
+            "state": "absent",
+            "version": null
+          },
+          "legacy_path": ".claude/CLAUDE.md",
+          "reason": null,
+          "scope": "project",
+          "workspace_compatible": true,
+          "workspace_reason": null
+        },
+        "ok": true,
+        "result": {
+          "action": "install",
+          "audit": "pass",
+          "bridge_healthy": true,
+          "doctrine_files": 5,
+          "doors": {
+            "claude": {
+              "bridge": {
+                "end": 87,
+                "start": 0,
+                "state": "installed",
+                "version": "1.0.0"
+              },
+              "installed": true,
+              "legacy_bridge": {
+                "end": null,
+                "start": null,
+                "state": "absent",
+                "version": null
+              },
+              "path": "CLAUDE.md",
+              "reason": null,
+              "status": "NO_CHANGE"
+            }
+          },
+          "enforcement": "guidance_only",
+          "installed": true,
+          "integration": "claude",
+          "pending_reviews": 0,
+          "scope": "project",
+          "status_only": true,
+          "warnings": [],
+          "workspace_compatible": true
+        },
+        "status": "NO_CHANGE",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/project"
+      },
+      "exterior_ok": true
+    },
+    {
+      "name": "e6-audit",
+      "ok": true,
+      "exit": 0,
+      "decision": "PASS",
+      "envelope": {
+        "api_version": "aef.cli/v1",
+        "command": "AUDIT",
+        "diff": null,
+        "dry_run": false,
+        "error": null,
+        "meta": {},
+        "ok": true,
+        "result": {
+          "findings": [],
+          "schema_version": "1.0.0"
+        },
+        "status": "PASS",
+        "workspace": "<TEMP>/aef-epics-3-6-validation/journeys/epic6/project"
+      },
+      "note": "guidance health is --status; audit must not invent guidance findings",
+      "exterior_ok": true
+    }
+  ],
+  "ok": true
+}
