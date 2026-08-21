@@ -130,6 +130,9 @@ def test_final_output_boundary_never_retries_or_leaks(
     ("DOCTOR", "NO_CHANGE", 0),
     ("DOCTOR", "INSTALL_REQUIRED", 8),
     ("DOCTOR", "BLOCKED", 4),
+    ("INGEST", "CHANGE", 0),
+    ("INGEST", "NO_CHANGE", 0),
+    ("INGEST", "BLOCKED", 4),
 ])
 def test_protocol_exit_code_mapping(command, status, expected):
     assert cli._exit_code(command, status) == expected

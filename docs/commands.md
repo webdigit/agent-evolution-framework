@@ -114,6 +114,26 @@ does not run `pip`. After a consented install, AEF runs `--version` and, when
 
 There is no `aef update` command. `upgrade` migrates workspace files only.
 
+## INGEST
+
+```console
+aef ingest --intake FILE [--dry-run]
+aef --json ingest --intake FILE [--dry-run]
+```
+
+Cite persisted `record_id` values and declare already-normalized learning
+events. AEF calls the existing `ingest_events` engine and writes only
+`.agent/knowledge/knowledge.json`. It does not rewrite records, create XP,
+rules, principles, or competencies, and it is not `doctor` or `upgrade`.
+
+`--json` is global and must precede the command. `--dry-run` projects the
+knowledge change without writing. Replaying the same intake against the same
+knowledge returns `NO_CHANGE`. A missing record or a digest that does not
+match the persisted file is `BLOCKED` (exit 4) with no write. An invalid
+intake is `ERROR` (exit 3).
+
+See [Canonical input files](input-files.md) for an executable example.
+
 ## Claude integration
 
 ```console

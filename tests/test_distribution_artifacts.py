@@ -31,6 +31,7 @@ def _sdist(path, extra=(), extra_named=None, duplicates=(), extra_infos=()):
         "agent-evolution-framework-0.1.0/docs/examples/reviews.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/ingest.json": b"{}",
         **{
             f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
             for schema in SCHEMAS
@@ -77,7 +78,11 @@ def test_release_artifact_inspector_rejects_unexpected_schema(tmp_path):
 
 
 def test_record_runtime_schemas_are_required_in_artifact_contract():
-    assert {"record-submission.schema.json", "record.schema.json"} <= SCHEMAS
+    assert {
+        "record-submission.schema.json",
+        "record.schema.json",
+        "ingest-submission.schema.json",
+    } <= SCHEMAS
 
 
 def test_upgrade_transaction_schema_is_required_in_artifact_contract():

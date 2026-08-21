@@ -72,6 +72,9 @@ record file. Replaying the same valid document returns `NO_CHANGE`. Reusing
 the same `record_id` with different content is blocked without rewriting the
 existing file.
 
+To derive signals from that journal, cite the persisted record in a separate
+intake and run `aef ingest --intake FILE`. RECORD itself does not learn.
+
 ## 4. Use AEF with an agent
 
 A natural-language request can be simple:
@@ -105,5 +108,5 @@ aef --compact evaluate --list
 Use `--dry-run` before a supported modification when you want to inspect the
 planned bytes without writing them.
 
-See [Canonical input files](input-files.md) for executable RECORD, DISCOVER,
-CONSOLIDATE, and EVALUATE documents.
+See [Canonical input files](input-files.md) for executable RECORD, INGEST,
+DISCOVER, CONSOLIDATE, and EVALUATE documents.

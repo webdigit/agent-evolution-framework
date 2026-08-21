@@ -85,6 +85,14 @@ aef integrate claude --remove
 The file is retained, even when empty. User content outside the segment remains
 unchanged.
 
+## INGEST is blocked
+
+`aef ingest` is blocked when a cited `record_id` is missing, unreadable, or
+the intake `digest` does not match the persisted record. Nothing is written
+under `.agent/knowledge/`. This is not `INSTALL_REQUIRED` and not an upgrade
+recovery. Persist the record first, copy its digest into the intake, then
+retry. An invalid intake document is exit 3, not a blocked citation.
+
 ## A draft Release job failed
 
 Read [Release delivery](release.md). Do not move an existing tag, delete a

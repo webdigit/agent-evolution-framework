@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/ingest-submission.schema.json",
+  "title": "AEF Ingest Submission",
+  "description": "Explicit learning-event intake. Cites persisted aef.record/v1 files. Does not infer kinds from record payloads.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "records"],
+  "properties": {
+    "protocol": {"const": "aef.ingest.submit/v1"},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/citation"}
+    }
+  },
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "digest", "events"],
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/event"}
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "novel": {"type": "boolean"},
+        "kind": {
+          "enum": ["help_request", "human_correction", "rule_mismatch", "success"]
+        },
+        "pattern_key": {"type": "string", "minLength": 1},
+        "competency": {"type": "string", "minLength": 1},
+        "rule_id": {"type": "string", "minLength": 1},
+        "explained": {"type": "boolean"}
+      }
+    }
+  }
+}

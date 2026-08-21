@@ -56,6 +56,8 @@ from .claude_integration import (
 from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
 from .runtime_doctor import diagnose_runtime
 from .runtime_install import InstallRefused, install_isolated, verify_installed
+from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
+from .ingest_ops import plan_ingest
 from .operations import (
     InvalidDiscoveryRegistryError,
     InvalidDiscoverySnapshotError,
@@ -200,7 +202,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         status = envelope["status"]
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
-            "RECORD", "UPGRADE", "DOCTOR",
+            "RECORD", "UPGRADE", "DOCTOR", "INGEST",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -216,6 +218,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
                 "PASS", "CHANGE", "NO_CHANGE", "INSTALL_REQUIRED",
                 "BLOCKED", "FAILED", "ERROR",
             },
+            "INGEST": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
         }
         if status not in allowed[command]:
             return False
@@ -604,6 +607,41 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Workspace : {workspace}\n"
                 )
 
+        if command == "INGEST":
+            records = result.get("records") or []
+            cited = _escape_human_value(
+                ", ".join(str(item) for item in records) if records else "none"
+            )
+            events_accepted = _escape_human_value(result.get("events_accepted", 0))
+            projected = result.get("projected") if isinstance(result.get("projected"), dict) else {}
+            signals = _escape_human_value(len(projected.get("signals") or []))
+            if status == "CHANGE":
+                heading = (
+                    "AEF ingest plan is ready"
+                    if envelope.get("dry_run")
+                    else "AEF ingested declared events"
+                )
+                return (
+                    f"[OK] {heading}\n\n"
+                    f"Records   : {cited}\n"
+                    f"Events    : {events_accepted}\n"
+                    f"Signals   : {signals}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF ingest is unchanged\n\n"
+                    f"Records   : {cited}\n"
+                    f"Workspace : {workspace}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF ingest is blocked\n\n"
+                    f"Reason    : {reason}\n"
+                    f"Workspace : {workspace}\n"
+                )
         marker = "FAILED" if status == "FAILED" else "ERROR"
         safe_status = _escape_human_value(status)
         return f"[{marker}] AEF command ended with status {safe_status}\n"
@@ -751,6 +789,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--install",
         action="store_true",
         help="consent to the proposed isolated Python installation",
+    )
+    ingest_parser = commands.add_parser(
+        "ingest",
+        help="ingest declared learning events from persisted records",
+        description=(
+            "Cite persisted records and declare normalized learning events. "
+            "Derives signals and observations only. Does not grant authority, "
+            "create XP, or write records."
+        ),
+    )
+    ingest_parser.add_argument(
+        "--intake", required=True, metavar="FILE",
+        help="ingest intake document citing persisted record_id values",
+    )
+    ingest_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="render the exact knowledge plan without writing",
     )
     return parser
 
@@ -1332,8 +1387,50 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_upgrade(args)
     if args.command == "doctor":
         return _run_doctor(args)
+    if args.command == "ingest":
+        return _run_ingest(args)
     return _run_evaluate(args)
 
+
+def _load_intake(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The ingest document is not valid JSON.",
+        ) from exc
+
+def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    document = _load_intake(args.intake)
+    try:
+        status, result, meta, diff = plan_ingest(
+            workspace, document, dry_run=args.dry_run
+        )
+    except IngestBlockedError as exc:
+        envelope = _envelope(
+            command="INGEST",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("INGEST", "BLOCKED")
+    envelope = _envelope(
+        command="INGEST",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("INGEST", status)
 
 def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
@@ -1518,6 +1615,23 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 5
+    elif isinstance(exc, InvalidIngestSubmissionError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, IngestBlockedError):
+        envelope = _envelope(
+            command=str(getattr(args, "command", "ingest")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code},
+            diff=None,
+        )
+        return envelope, 4
     elif isinstance(exc, InstallRefused):
         envelope = _envelope(
             command=str(getattr(args, "command", "doctor")).upper(),
