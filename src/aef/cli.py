@@ -19,15 +19,18 @@ from .decisions import (
     validate_decisions_document,
 )
 from .filesystem import (
+    CompetencyDeclarationRecoveryRequiredError,
     EvaluationRecoveryRequiredError,
     UpgradeRecoveryRequiredError,
-    CompetencyDeclarationRecoveryRequiredError,
     apply_workspace,
     load_workspace,
     plan_workspace,
 )
 from .upgrade_plan import MigrationFailure
 from .upgrade_ops import run_upgrade
+from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
+from .runtime_doctor import diagnose_runtime
+from .runtime_install import InstallRefused, install_isolated, verify_installed
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -52,19 +55,21 @@ from .claude_filesystem import (
     validate_claude_doctrine_files,
 )
 from .claude_integration import (
-    plan_claude_integration, validate_claude_integration_workspace,
+    CLAUDE_BRIDGE_PATH,
+    validate_claude_integration_workspace,
 )
-from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
-from .runtime_doctor import diagnose_runtime
-from .runtime_install import InstallRefused, install_isolated, verify_installed
-from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
-from .ingest_ops import plan_ingest
-from .competency_declaration import (
-    CompetencyDeclarationBlockedError,
-    InvalidCompetencyDeclarationError,
+from .guidance_filesystem import (
+    GuidanceFilesystemError,
+    apply_guidance_file,
+    door_path,
+    guidance_diff,
+    read_guidance_file,
 )
-from .competency_declaration_ops import plan_declare, recover_declaration
-from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
+from .guidance_integration import (
+    AGENTS_PATH,
+    plan_claude_door,
+    plan_door_integration,
+)
 from .operations import (
     InvalidDiscoveryRegistryError,
     InvalidDiscoverySnapshotError,
@@ -75,6 +80,14 @@ from .operations import (
 )
 from .record_document import InvalidRecordSubmissionError, build_persisted_record
 from .record_store import InvalidRecordStoreError, persist_record
+from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
+from .competency_declaration import (
+    CompetencyDeclarationBlockedError,
+    InvalidCompetencyDeclarationError,
+)
+from .competency_declaration_ops import plan_declare, recover_declaration
+from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
+from .ingest_ops import plan_ingest
 
 
 API_VERSION = "aef.cli/v1"
@@ -468,7 +481,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
             if status == "BLOCKED":
                 reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
                 return (
-                    "[BLOCKED] Claude integration cannot be updated safely\n\n"
+                    "[BLOCKED] Guidance integration cannot be updated safely\n\n"
                     f"Reason    : {reason.replace('_', ' ')}\n"
                     f"Workspace : {workspace}\n"
                 )
@@ -479,31 +492,33 @@ def _render_human(envelope: dict[str, Any]) -> str:
                         _escape_human_value(item) for item in warnings
                     )
                 )
+                integration = _escape_human_value(result.get("integration", "guidance"))
                 if not result.get("installed"):
                     return (
-                        "[OK] Claude project integration is not installed\n\n"
+                        f"[OK] Guidance integration ({integration}) is not installed\n\n"
                         f"Workspace : {workspace}\nWarnings  : {warning_text}\n"
                     )
                 audit = _escape_human_value(result.get("audit", "unknown"))
                 reviews = _escape_human_value(result.get("pending_reviews", "unknown"))
                 return (
-                    "[OK] Claude project integration is healthy\n\n"
+                    f"[OK] Guidance integration ({integration}) is healthy\n\n"
                     f"Doctrine : loaded\nAudit    : {audit}\n"
                     f"Reviews  : {reviews} pending\nWarnings : {warning_text}\n"
                 )
             action = result.get("action")
+            integration = _escape_human_value(result.get("integration", "guidance"))
             if status == "CHANGE":
                 if action == "remove":
                     heading = (
-                        "[OK] Claude integration would be removed"
+                        f"[OK] Guidance integration ({integration}) would be removed"
                         if envelope.get("dry_run") else
-                        "[OK] Claude integration removed"
+                        f"[OK] Guidance integration ({integration}) removed"
                     )
                 else:
                     heading = (
-                        "[OK] Claude integration would be installed"
+                        f"[OK] Guidance integration ({integration}) would be installed"
                         if envelope.get("dry_run") else
-                        "[OK] Claude integration installed"
+                        f"[OK] Guidance integration ({integration}) installed"
                     )
                 return (
                     f"{heading}\n\nScope       : {scope}\n"
@@ -512,10 +527,12 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 )
             if action == "remove":
                 return (
-                    "[OK] Claude integration is not installed\n\nChanges : none\n"
+                    f"[OK] Guidance integration ({integration}) is not installed\n\n"
+                    "Changes : none\n"
                 )
             return (
-                "[OK] Claude integration is already installed\n\nChanges : none\n"
+                f"[OK] Guidance integration ({integration}) is already installed\n\n"
+                "Changes : none\n"
             )
 
         if command == "UPGRADE":
@@ -592,6 +609,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Reason    : {reason}\n"
                     f"Workspace : {workspace}\n"
                 )
+
         if command == "RECORD":
             record_id = _escape_human_value(result.get("record_id", "unknown"))
             if status == "CHANGE":
@@ -650,6 +668,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Reason    : {reason}\n"
                     f"Workspace : {workspace}\n"
                 )
+
         if command == "COMPETENCY_DECLARE":
             competency_id = _escape_human_value(result.get("competency_id", "unknown"))
             recovery = result.get("recovery_action")
@@ -699,6 +718,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Reason    : {reason}\n"
                     f"Workspace : {workspace}\n"
                 )
+
         marker = "FAILED" if status == "FAILED" else "ERROR"
         safe_status = _escape_human_value(status)
         return f"[{marker}] AEF command ended with status {safe_status}\n"
@@ -716,12 +736,12 @@ def _write_stderr(message: str) -> None:
 
 
 def _exit_code(command: str, status: str) -> int:
-    if status == DECISION_INSTALL_REQUIRED:
-        return INSTALL_REQUIRED_EXIT
     if status in {"CHANGE", "NO_CHANGE", "PASS"}:
         return 0
     if command == "AUDIT" and status == "FAIL":
         return 1
+    if status == DECISION_INSTALL_REQUIRED:
+        return INSTALL_REQUIRED_EXIT
     if status == "BLOCKED":
         return 4
     # Reserved for a business operation returning FAILED. Neither INIT nor
@@ -797,23 +817,65 @@ def _build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--dry-run", action="store_true", help="render the exact plan without writing")
     integrate_parser = commands.add_parser(
         "integrate", help="manage project-local integrations",
-        description="Manage guidance integrations confined to this project.",
+        description=(
+            "Manage project-local guidance doors. Guidance only — not permission, "
+            "hooks, or host settings. Doctrinal rules live in AGENTS.md; "
+            "CLAUDE.md and GEMINI.md are doorbells."
+        ),
     )
     integrations = integrate_parser.add_subparsers(
         dest="integration", required=True
     )
-    claude_parser = integrations.add_parser(
-        "claude", help="manage the Claude project guidance bridge",
-        description="Install, inspect, or remove the project-local Claude guidance bridge.",
+
+    def _door_parser(name: str, help_text: str, description: str):
+        parser = integrations.add_parser(
+            name, help=help_text, description=description,
+        )
+        parser.add_argument(
+            "--scope", default="project", metavar="project",
+            help="integration scope (V1 supports project only; default: project)",
+        )
+        action = parser.add_mutually_exclusive_group()
+        action.add_argument(
+            "--status", action="store_true", dest="status_only",
+            help="inspect status without writing",
+        )
+        action.add_argument(
+            "--remove", action="store_true",
+            help="remove only the managed AEF segment for this door",
+        )
+        parser.add_argument(
+            "--dry-run", action="store_true",
+            help="render the exact guidance change without writing",
+        )
+        return parser
+
+    _door_parser(
+        "agents",
+        "manage the shared AGENTS.md guidance segment",
+        "Install, inspect, or remove the managed AGENTS.md segment (citations only).",
     )
-    claude_parser.add_argument(
-        "--scope", default="project", metavar="project",
-        help="integration scope (V1 supports project only; default: project)",
+    _door_parser(
+        "claude",
+        "manage the Claude root doorbell (legacy .claude bridge recognized)",
+        (
+            "Install or remove the root CLAUDE.md doorbell pointing at AGENTS.md. "
+            "Status also reports a brownfield .claude/CLAUDE.md bridge without rewriting it."
+        ),
     )
-    claude_action = claude_parser.add_mutually_exclusive_group()
-    claude_action.add_argument("--status", action="store_true", dest="status_only", help="inspect status without writing")
-    claude_action.add_argument("--remove", action="store_true", help="remove only the managed AEF segment")
-    claude_parser.add_argument("--dry-run", action="store_true", help="render the exact bridge change without writing")
+    _door_parser(
+        "gemini",
+        "manage the GEMINI.md doorbell",
+        "Install, inspect, or remove the managed GEMINI.md doorbell (no doctrine rules).",
+    )
+    _door_parser(
+        "all",
+        "manage AGENTS.md plus Claude and Gemini doorbells",
+        (
+            "Apply, inspect, or remove the shared commun and root doorbells together. "
+            "Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
+        ),
+    )
     upgrade_parser = commands.add_parser(
         "upgrade",
         help="verify or apply workspace schema evolution",
@@ -915,7 +977,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             parser.error("argument --declaration: not allowed with argument --recover")
         if not args.recover and not args.declaration:
             parser.error("argument --declaration is required unless --recover is set")
-
     return args
 
 
@@ -1133,6 +1194,95 @@ def _run_record(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         diff=diff,
     )
     return envelope, _exit_code("RECORD", status)
+
+
+def _load_intake(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The ingest document is not valid JSON.",
+        ) from exc
+
+
+def _load_declaration(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The competency declaration document is not valid JSON.",
+        ) from exc
+
+
+def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    document = _load_intake(args.intake)
+    try:
+        status, result, meta, diff = plan_ingest(
+            workspace, document, dry_run=args.dry_run
+        )
+    except IngestBlockedError as exc:
+        envelope = _envelope(
+            command="INGEST",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("INGEST", "BLOCKED")
+    envelope = _envelope(
+        command="INGEST",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("INGEST", status)
+
+
+def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    try:
+        if args.recover:
+            status, result, meta, diff = recover_declaration(
+                workspace, dry_run=args.dry_run,
+            )
+        else:
+            document = _load_declaration(args.declaration)
+            status, result, meta, diff = plan_declare(
+                workspace, document, dry_run=args.dry_run,
+            )
+    except CompetencyDeclarationBlockedError as exc:
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("COMPETENCY_DECLARE", "BLOCKED")
+    envelope = _envelope(
+        command="COMPETENCY_DECLARE",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("COMPETENCY_DECLARE", status)
 
 
 def _load_snapshot(path: str | Path) -> Any:
@@ -1391,12 +1541,12 @@ def _claude_settings_warnings(workspace: Path) -> list[str]:
 
 
 def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    if args.integration != "claude":
+    if args.integration not in {"agents", "claude", "gemini", "all"}:
         raise CLIInputError("unsupported_integration", "The integration is unsupported.")
     if args.scope != "project":
         raise CLIInputError(
             "unsupported_integration_scope",
-            "Only project-scoped Claude integration is supported.",
+            "Only project-scoped guidance integration is supported.",
             {"scope": args.scope},
         )
     workspace = Path(args.workspace).resolve()
@@ -1408,22 +1558,152 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             validate_claude_doctrine_files(workspace)
         except ClaudeIntegrationFilesystemError:
             doctrine_error = "missing_aef_doctrine"
-    try:
-        existing = read_claude_bridge(workspace)
-    except ClaudeIntegrationFilesystemError as exc:
-        raise CLIInputError(
-            "invalid_claude_instruction_file",
-            "The Claude project instruction file is invalid.",
-        ) from exc
-    status, desired, meta = plan_claude_integration(
-        current, existing, remove=args.remove, status_only=args.status_only
+
+    doors = (
+        ["agents", "claude", "gemini"] if args.integration == "all"
+        else [args.integration]
     )
-    if doctrine_error is not None:
-        status = "BLOCKED"
-        meta = {
-            **meta, "reason": doctrine_error, "doctrine_files": 0,
-            "bridge_healthy": False, "workspace_compatible": False,
+    if args.remove and args.integration == "all":
+        doors = ["gemini", "claude", "agents"]
+
+    aggregate_status = "NO_CHANGE"
+    aggregate_diff = {"created": [], "modified": [], "removed": []}
+    door_results: dict[str, Any] = {}
+    last_meta: dict[str, Any] = {}
+    primary_installed = False
+
+    def _merge_diff(diff: dict[str, list[str]]) -> None:
+        for key in ("created", "modified", "removed"):
+            for path in diff.get(key, []):
+                if path not in aggregate_diff[key]:
+                    aggregate_diff[key].append(path)
+
+    def _apply_one(door: str) -> tuple[str, dict[str, Any]]:
+        nonlocal aggregate_status, primary_installed, last_meta
+        try:
+            if door == "claude":
+                root_existing = read_guidance_file(workspace, door_path("claude"))
+                legacy_existing = read_claude_bridge(workspace)
+                status, _, meta = plan_claude_door(
+                    current, root_existing, legacy_existing,
+                    remove=args.remove, status_only=args.status_only,
+                )
+            else:
+                existing = read_guidance_file(workspace, door_path(door))
+                status, _, meta = plan_door_integration(
+                    current, existing, door=door,
+                    remove=args.remove, status_only=args.status_only,
+                )
+        except (GuidanceFilesystemError, ClaudeIntegrationFilesystemError) as exc:
+            raise CLIInputError(
+                "invalid_guidance_file",
+                "A guidance instruction file is invalid.",
+            ) from exc
+
+        if doctrine_error is not None and not args.status_only:
+            status = "BLOCKED"
+            meta = {
+                **meta, "reason": doctrine_error, "doctrine_files": 0,
+                "bridge_healthy": False, "workspace_compatible": False,
+            }
+        elif doctrine_error is not None and args.status_only:
+            meta = {
+                **meta, "reason": doctrine_error, "doctrine_files": 0,
+                "bridge_healthy": False, "workspace_compatible": False,
+            }
+            status = "BLOCKED"
+
+        desired_bytes = meta.get("desired_bytes")
+        relative = meta.get("bridge_path") or door_path(door)
+        existing_for_diff: bytes | None
+        if door == "claude" and meta.get("target") == "legacy_bridge":
+            existing_for_diff = read_claude_bridge(workspace)
+            relative = CLAUDE_BRIDGE_PATH
+            diff = (
+                claude_bridge_diff(existing_for_diff, desired_bytes)
+                if status == "CHANGE" else {"created": [], "modified": [], "removed": []}
+            )
+        else:
+            existing_for_diff = read_guidance_file(workspace, relative)
+            diff = (
+                guidance_diff(relative, existing_for_diff, desired_bytes)
+                if status == "CHANGE" and desired_bytes is not None
+                else {"created": [], "modified": [], "removed": []}
+            )
+
+        if status == "CHANGE" and not args.dry_run and not args.status_only:
+            if door == "claude" and meta.get("target") == "legacy_bridge":
+                diff = apply_claude_bridge(workspace, existing_for_diff, desired_bytes)
+            else:
+                diff = apply_guidance_file(
+                    workspace, relative, existing_for_diff, desired_bytes,
+                )
+
+        if status == "CHANGE":
+            aggregate_status = "CHANGE"
+            _merge_diff(diff)
+        elif status == "BLOCKED" and aggregate_status != "CHANGE":
+            aggregate_status = "BLOCKED"
+
+        installed = meta.get("bridge", {}).get("state") == "installed"
+        if door == "claude" and meta.get("legacy_bridge", {}).get("state") == "installed":
+            installed = installed or True
+        if args.remove and status == "CHANGE":
+            installed = False
+        elif not args.remove and status == "CHANGE":
+            installed = True
+        if installed:
+            primary_installed = True
+
+        door_results[door] = {
+            "status": status,
+            "path": relative,
+            "bridge": meta.get("bridge"),
+            "legacy_bridge": meta.get("legacy_bridge"),
+            "reason": meta.get("reason"),
+            "installed": installed,
         }
+        last_meta = meta
+        return status, meta
+
+    # Co-install AGENTS.md before doorbells on install (not status/remove).
+    if (
+        not args.status_only
+        and not args.remove
+        and args.integration in {"claude", "gemini", "all"}
+    ):
+        agents_existing = read_guidance_file(workspace, AGENTS_PATH)
+        agents_status, _, agents_meta = plan_door_integration(
+            current, agents_existing, door="agents",
+        )
+        if doctrine_error is None and agents_status == "CHANGE":
+            agents_diff = guidance_diff(
+                AGENTS_PATH, agents_existing, agents_meta["desired_bytes"],
+            )
+            if not args.dry_run:
+                apply_guidance_file(
+                    workspace, AGENTS_PATH, agents_existing, agents_meta["desired_bytes"],
+                )
+            aggregate_status = "CHANGE"
+            _merge_diff(agents_diff)
+            door_results["agents"] = {
+                "status": "CHANGE",
+                "path": AGENTS_PATH,
+                "bridge": agents_meta.get("bridge"),
+                "installed": True,
+                "co_installed": True,
+            }
+
+    for door in doors:
+        if (
+            not args.remove
+            and not args.status_only
+            and door == "agents"
+            and door_results.get("agents", {}).get("co_installed")
+        ):
+            continue
+        _apply_one(door)
+
     warnings = _claude_settings_warnings(workspace) if args.status_only else []
     audit = audit_project(current, root=workspace) if args.status_only else None
     pending = None
@@ -1433,36 +1713,41 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             pending = len(pending_meta.get("recommendations", []))
         except ValueError:
             warnings.append("aef_evaluation_status_unavailable")
-    desired_bytes = meta.get("desired_bytes", existing)
-    diff = claude_bridge_diff(existing, desired_bytes) if status == "CHANGE" else {
-        "created": [], "modified": [], "removed": [],
-    }
-    if status == "CHANGE" and not args.dry_run:
-        diff = apply_claude_bridge(workspace, existing, desired_bytes)
+
+    if aggregate_status == "BLOCKED" and last_meta.get("reason") is None and doctrine_error:
+        last_meta["reason"] = doctrine_error
+
     result = {
         "scope": "project",
+        "integration": args.integration,
         "action": "remove" if args.remove else "install",
         "status_only": args.status_only,
-        "installed": (
-            False if args.remove and status == "CHANGE" else
-            True if not args.remove and status == "CHANGE" else
-            meta.get("bridge", {}).get("state") == "installed"
+        "installed": primary_installed if args.status_only or not args.remove else (
+            False if args.remove and aggregate_status == "CHANGE" else primary_installed
         ),
-        "bridge_healthy": meta.get("bridge_healthy", status != "BLOCKED"),
-        "workspace_compatible": meta.get("workspace_compatible", status != "BLOCKED"),
-        "doctrine_files": meta.get("doctrine_files", 0),
+        "bridge_healthy": last_meta.get(
+            "bridge_healthy", aggregate_status != "BLOCKED"
+        ),
+        "workspace_compatible": last_meta.get(
+            "workspace_compatible", aggregate_status != "BLOCKED"
+        ),
+        "doctrine_files": last_meta.get("doctrine_files", 0),
         "enforcement": "guidance_only",
+        "doors": door_results,
         "audit": audit.get("status", "unknown").lower() if audit else None,
         "pending_reviews": pending,
         "warnings": warnings,
     }
+    meta_out = {
+        key: value for key, value in last_meta.items()
+        if key != "desired_bytes"
+    }
     envelope = _envelope(
-        command="INTEGRATE", workspace=workspace, status=status,
-        ok=status in {"CHANGE", "NO_CHANGE"}, dry_run=args.dry_run,
-        result=result, meta={key: value for key, value in meta.items()
-                             if key != "desired_bytes"}, diff=diff,
+        command="INTEGRATE", workspace=workspace, status=aggregate_status,
+        ok=aggregate_status in {"CHANGE", "NO_CHANGE"}, dry_run=args.dry_run,
+        result=result, meta=meta_out, diff=aggregate_diff,
     )
-    return envelope, _exit_code("INTEGRATE", status)
+    return envelope, _exit_code("INTEGRATE", aggregate_status)
 
 
 def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
@@ -1488,91 +1773,6 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_competency_declare(args)
     return _run_evaluate(args)
 
-
-def _load_intake(path: str | Path) -> Any:
-    try:
-        return _load_snapshot(path)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        raise CLIInputError(
-            "invalid_json",
-            "The ingest document is not valid JSON.",
-        ) from exc
-
-def _load_declaration(path: str | Path) -> Any:
-    try:
-        return _load_snapshot(path)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        raise CLIInputError(
-            "invalid_json",
-            "The competency declaration document is not valid JSON.",
-        ) from exc
-
-def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
-    try:
-        if args.recover:
-            status, result, meta, diff = recover_declaration(
-                workspace, dry_run=args.dry_run,
-            )
-        else:
-            document = _load_declaration(args.declaration)
-            status, result, meta, diff = plan_declare(
-                workspace, document, dry_run=args.dry_run,
-            )
-    except CompetencyDeclarationBlockedError as exc:
-        envelope = _envelope(
-            command="COMPETENCY_DECLARE",
-            workspace=workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=args.dry_run,
-            result={},
-            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
-            diff=None,
-        )
-        return envelope, _exit_code("COMPETENCY_DECLARE", "BLOCKED")
-    envelope = _envelope(
-        command="COMPETENCY_DECLARE",
-        workspace=workspace,
-        status=status,
-        ok=status in {"CHANGE", "NO_CHANGE"},
-        dry_run=args.dry_run,
-        result=result,
-        meta=meta,
-        diff=diff,
-    )
-    return envelope, _exit_code("COMPETENCY_DECLARE", status)
-
-def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
-    document = _load_intake(args.intake)
-    try:
-        status, result, meta, diff = plan_ingest(
-            workspace, document, dry_run=args.dry_run
-        )
-    except IngestBlockedError as exc:
-        envelope = _envelope(
-            command="INGEST",
-            workspace=workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=args.dry_run,
-            result={},
-            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
-            diff=None,
-        )
-        return envelope, _exit_code("INGEST", "BLOCKED")
-    envelope = _envelope(
-        command="INGEST",
-        workspace=workspace,
-        status=status,
-        ok=status in {"CHANGE", "NO_CHANGE"},
-        dry_run=args.dry_run,
-        result=result,
-        meta=meta,
-        diff=diff,
-    )
-    return envelope, _exit_code("INGEST", status)
 
 def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
@@ -1634,6 +1834,7 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     )
     return envelope, _exit_code("DOCTOR", status)
 
+
 def _run_upgrade(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
     if args.recover and args.dry_run:
@@ -1678,6 +1879,58 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         message = str(exc)
         details = {}
         exit_code = 3
+    elif isinstance(exc, InvalidIngestSubmissionError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidCompetencyDeclarationError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, InvalidCompetencyDeclarationTransactionError):
+        code = "invalid_competency_declaration_transaction"
+        message = "The competency declaration transaction is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, CompetencyDeclarationBlockedError):
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE",
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, IngestBlockedError):
+        envelope = _envelope(
+            command=str(getattr(args, "command", "ingest")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, CompetencyDeclarationRecoveryRequiredError):
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE" if getattr(args, "command", "") == "competency"
+            else str(getattr(args, "command", "unknown")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": "competency_declaration_recovery_required"},
+            diff=None,
+        )
+        return envelope, 4
     elif isinstance(exc, InvalidDecisionsDocumentError):
         code = "invalid_decisions_document"
         message = "The decisions document is invalid."
@@ -1757,58 +2010,6 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 5
-    elif isinstance(exc, InvalidIngestSubmissionError):
-        code = exc.code
-        message = str(exc)
-        details = {}
-        exit_code = 3
-    elif isinstance(exc, IngestBlockedError):
-        envelope = _envelope(
-            command=str(getattr(args, "command", "ingest")).upper(),
-            workspace=args.workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=bool(getattr(args, "dry_run", False)),
-            result={},
-            meta={"reason": exc.code},
-            diff=None,
-        )
-        return envelope, 4
-    elif isinstance(exc, InvalidCompetencyDeclarationError):
-        code = exc.code
-        message = str(exc)
-        details = {}
-        exit_code = 3
-    elif isinstance(exc, CompetencyDeclarationBlockedError):
-        envelope = _envelope(
-            command="COMPETENCY_DECLARE",
-            workspace=args.workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=bool(getattr(args, "dry_run", False)),
-            result={},
-            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
-            diff=None,
-        )
-        return envelope, 4
-    elif isinstance(exc, InvalidCompetencyDeclarationTransactionError):
-        code = "invalid_competency_declaration_transaction"
-        message = "The competency declaration transaction is invalid."
-        details = {}
-        exit_code = 3
-    elif isinstance(exc, CompetencyDeclarationRecoveryRequiredError):
-        envelope = _envelope(
-            command="COMPETENCY_DECLARE" if getattr(args, "command", "") == "competency"
-            else str(getattr(args, "command", "unknown")).upper(),
-            workspace=args.workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=bool(getattr(args, "dry_run", False)),
-            result={},
-            meta={"reason": "competency_declaration_recovery_required"},
-            diff=None,
-        )
-        return envelope, 4
     elif isinstance(exc, InstallRefused):
         envelope = _envelope(
             command=str(getattr(args, "command", "doctor")).upper(),
@@ -1824,6 +2025,11 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
     elif isinstance(exc, ClaudeIntegrationFilesystemError):
         code = "claude_integration_filesystem_error"
         message = "The Claude project integration could not be written safely."
+        details = {}
+        exit_code = 6
+    elif isinstance(exc, GuidanceFilesystemError):
+        code = "guidance_filesystem_error"
+        message = "The guidance integration could not be written safely."
         details = {}
         exit_code = 6
     elif isinstance(exc, (json.JSONDecodeError, UnicodeError)):

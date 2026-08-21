@@ -67,22 +67,22 @@ In plain language, you can now tell your agent: “Use this project's AEF rules,
 record evidence from completed work, and tell me when a promotion review is
 available.” AEF keeps the resulting state inspectable and replay-safe.
 
-## Activate AEF guidance in Claude Code
+## Activate AEF guidance for agents
 
 ```console
-aef integrate claude
+aef integrate all
 aef integrate claude --status
 ```
 
-The integration modifies only the managed segment in
-`.claude/CLAUDE.md` inside this project and imports the five AEF doctrine
-files. It does not write user-level Claude settings, install hooks, or modify a
-root `CLAUDE.md`.
+The integration installs a managed segment in project-root `AGENTS.md` (doctrine
+citations) plus doorbells `CLAUDE.md` / `GEMINI.md`. It does not write
+user-level Claude settings, install hooks, or create a new fat
+`.claude/CLAUDE.md` bridge. An existing brownfield bridge is left alone.
 
-The Claude bridge is **guidance-only**. It does not technically enforce tool
-use, grant authority, or allow Claude to approve, reject, or recover an
-evaluation without an explicit user request. See
-[Claude integration](docs/claude-integration.md).
+Guidance is **guidance-only**. It does not technically enforce tool use, grant
+authority, or allow an agent to approve, reject, or recover an evaluation
+without an explicit user request. See
+[Claude and agent guidance](docs/claude-integration.md).
 
 ## Essential commands
 
@@ -95,7 +95,7 @@ aef discover --snapshot connectors.json
 aef consolidate --reviews reviews.json
 aef evaluate --list
 aef evaluate --decisions decisions.json
-aef integrate claude --status
+aef integrate all --status
 ```
 
 Use `--dry-run` on supported modifying commands to inspect the planned result.

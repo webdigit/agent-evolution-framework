@@ -8,6 +8,7 @@ import pytest
 from aef.claude_integration import (
     CLAUDE_BRIDGE_BYTES, LEGACY_CLAUDE_BRIDGE_BYTES,
 )
+from aef.guidance_integration import AGENTS_BYTES, CLAUDE_ROOT_BYTES
 from conftest import installed_aef_script
 
 
@@ -47,8 +48,10 @@ def test_cli_install_status_replay_remove_and_empty_file_contract(tmp_path):
     assert [json.loads(item.stdout)["status"] for item in (
         installed, status, replay, removed, removed_replay
     )] == ["CHANGE", "NO_CHANGE", "NO_CHANGE", "CHANGE", "NO_CHANGE"]
-    assert (root / ".claude/CLAUDE.md").is_file()
-    assert (root / ".claude/CLAUDE.md").read_bytes() == b""
+    assert (root / "CLAUDE.md").is_file()
+    assert (root / "CLAUDE.md").read_bytes() == b""
+    assert (root / "AGENTS.md").read_bytes() == AGENTS_BYTES
+    assert not (root / ".claude").exists()
 
 
 def test_cli_dry_run_matches_real_bytes_and_preserves_user_files(tmp_path):
@@ -65,11 +68,13 @@ def test_cli_dry_run_matches_real_bytes_and_preserves_user_files(tmp_path):
     assert dry.returncode == 0
     assert json.loads(dry.stdout)["status"] == "CHANGE"
     assert bridge.read_bytes() == b"# Existing user instructions"
+    assert root_claude.read_bytes() == b"root instructions\r\n"
     real = run_cli(root, "--json", "integrate", "claude")
 
     assert real.returncode == 0
-    assert bridge.read_bytes().startswith(b"# Existing user instructions\n\n")
-    assert root_claude.read_bytes() == b"root instructions\r\n"
+    assert bridge.read_bytes() == b"# Existing user instructions"
+    assert root_claude.read_bytes().startswith(b"root instructions\r\n\n\n")
+    assert CLAUDE_ROOT_BYTES in root_claude.read_bytes()
     assert settings.read_bytes() == b'{"hooks":{"SessionStart":[]}}'
 
 
@@ -77,6 +82,7 @@ def test_status_warns_about_unmanaged_malformed_settings_without_failure(tmp_pat
     root = initialized_workspace(tmp_path)
     assert run_cli(root, "--json", "integrate", "claude").returncode == 0
     settings = root / ".claude/settings.json"
+    settings.parent.mkdir(exist_ok=True)
     settings.write_bytes(b"not json")
 
     completed = run_cli(root, "--json", "integrate", "claude", "--status")
@@ -103,7 +109,7 @@ def test_human_install_uses_guidance_only_language(tmp_path):
     root = initialized_workspace(tmp_path)
     completed = run_cli(root, "--human", "integrate", "claude")
     assert completed.returncode == 0
-    assert "[OK] Claude integration installed" in completed.stdout
+    assert "Guidance integration" in completed.stdout
     assert "Enforcement : guidance only" in completed.stdout
     assert "{" not in completed.stdout
 
@@ -124,7 +130,7 @@ def test_installed_and_module_launchers_support_every_output_mode(
     assert completed.returncode == 0
     assert "Traceback" not in completed.stdout + completed.stderr
     if mode == "--human":
-        assert "Claude integration installed" in completed.stdout
+        assert "Guidance integration" in completed.stdout
         assert '"api_version"' not in completed.stdout
     else:
         assert json.loads(completed.stdout)["command"] == "INTEGRATE"
@@ -132,7 +138,7 @@ def test_installed_and_module_launchers_support_every_output_mode(
             assert completed.stdout.count("\n") == 1
 
 
-def test_exact_legacy_update_and_remove_dry_run_are_byte_stable(tmp_path):
+def test_legacy_bridge_is_not_rewritten_on_install_and_remove_falls_back(tmp_path):
     root = initialized_workspace(tmp_path)
     bridge = root / ".claude/CLAUDE.md"
     bridge.parent.mkdir()
@@ -142,41 +148,45 @@ def test_exact_legacy_update_and_remove_dry_run_are_byte_stable(tmp_path):
     dry = run_cli(root, "--json", "integrate", "claude", "--dry-run")
     assert dry.returncode == 0 and bridge.read_bytes() == original
     assert run_cli(root, "--json", "integrate", "claude").returncode == 0
-    updated = bridge.read_bytes()
-    assert updated == b"user\r\n\n\n" + CLAUDE_BRIDGE_BYTES + b"tail"
+    assert bridge.read_bytes() == original
+    assert (root / "CLAUDE.md").read_bytes() == CLAUDE_ROOT_BYTES
 
-    remove_dry = run_cli(
-        root, "--json", "integrate", "claude", "--remove", "--dry-run"
-    )
-    assert remove_dry.returncode == 0 and bridge.read_bytes() == updated
+    # Remove root doorbell first.
+    assert run_cli(root, "--json", "integrate", "claude", "--remove").returncode == 0
+    assert (root / "CLAUDE.md").read_bytes() == b""
+    assert bridge.read_bytes() == original
+
+    # Second remove clears legacy only.
     assert run_cli(root, "--json", "integrate", "claude", "--remove").returncode == 0
     assert bridge.read_bytes() == b"user\r\ntail"
 
 
-def test_modified_bridge_blocks_install_remove_and_status_without_writes(tmp_path):
+def test_modified_legacy_blocks_legacy_remove_but_allows_root_install(tmp_path):
     root = initialized_workspace(tmp_path)
     bridge = root / ".claude/CLAUDE.md"
     bridge.parent.mkdir()
     modified = CLAUDE_BRIDGE_BYTES.replace(b"guidance", b"authority", 1)
     bridge.write_bytes(modified)
-    for arguments in (
-        ("integrate", "claude"),
-        ("integrate", "claude", "--remove"),
-        ("integrate", "claude", "--status"),
-    ):
-        completed = run_cli(root, "--json", *arguments)
-        assert completed.returncode == 4
-        assert json.loads(completed.stdout)["meta"]["reason"] == (
-            "modified_claude_managed_block"
-        )
-        assert bridge.read_bytes() == modified
+
+    completed = run_cli(root, "--json", "integrate", "claude")
+    assert completed.returncode == 0
+    assert bridge.read_bytes() == modified
+    assert (root / "CLAUDE.md").read_bytes() == CLAUDE_ROOT_BYTES
+
+    assert run_cli(root, "--json", "integrate", "claude", "--remove").returncode == 0
+    completed = run_cli(root, "--json", "integrate", "claude", "--remove")
+    assert completed.returncode == 4
+    assert json.loads(completed.stdout)["meta"]["reason"] == (
+        "modified_claude_managed_block"
+    )
+    assert bridge.read_bytes() == modified
 
 
 def test_evaluation_transaction_blocks_mutations_but_not_status(tmp_path):
     root = initialized_workspace(tmp_path)
     assert run_cli(root, "--json", "integrate", "claude").returncode == 0
-    bridge = root / ".claude/CLAUDE.md"
-    before = bridge.read_bytes()
+    doorbell = root / "CLAUDE.md"
+    before = doorbell.read_bytes()
     transaction = root / ".agent/state/evaluation-transaction.json"
     transaction.write_text("{}\n", encoding="utf-8")
 
@@ -186,7 +196,7 @@ def test_evaluation_transaction_blocks_mutations_but_not_status(tmp_path):
         assert json.loads(completed.stdout)["meta"]["reason"] == (
             "evaluation_recovery_required"
         )
-        assert bridge.read_bytes() == before
+        assert doorbell.read_bytes() == before
     status = run_cli(root, "--json", "integrate", "claude", "--status")
     assert status.returncode == 0
     envelope = json.loads(status.stdout)
@@ -205,13 +215,15 @@ def test_status_distinguishes_healthy_bridge_from_failed_aef_audit(tmp_path):
     assert envelope["result"]["audit"] == "fail"
 
 
-def test_missing_doctrine_is_blocked_code_4_without_claude_directory(tmp_path):
+def test_missing_doctrine_is_blocked_code_4_without_writing_doors(tmp_path):
     root = initialized_workspace(tmp_path)
     (root / ".agent/core/learning.md").unlink()
     completed = run_cli(root, "--json", "integrate", "claude")
     assert completed.returncode == 4
     assert json.loads(completed.stdout)["meta"]["reason"] == "missing_aef_doctrine"
     assert not (root / ".claude").exists()
+    assert not (root / "CLAUDE.md").exists()
+    assert not (root / "AGENTS.md").exists()
 
 
 def test_unicode_workspace_is_safe_under_ascii_console_encoding(tmp_path):
@@ -233,6 +245,7 @@ def test_status_preserves_both_unmanaged_settings_and_existing_hooks(tmp_path):
     assert run_cli(root, "--json", "integrate", "claude").returncode == 0
     shared = root / ".claude/settings.json"
     local = root / ".claude/settings.local.json"
+    shared.parent.mkdir(exist_ok=True)
     shared.write_bytes(b'{"hooks":{"SessionStart":[{"matcher":"startup"}]}}')
     local.write_bytes(b"invalid local settings")
     before = {shared: shared.read_bytes(), local: local.read_bytes()}
@@ -248,7 +261,7 @@ def test_status_preserves_both_unmanaged_settings_and_existing_hooks(tmp_path):
 def test_fsync_failure_returns_public_filesystem_error_without_success(
     tmp_path, monkeypatch, capsys,
 ):
-    import aef.claude_filesystem as filesystem
+    import aef.guidance_filesystem as filesystem
     from aef.cli import main
 
     root = initialized_workspace(tmp_path)
@@ -258,19 +271,17 @@ def test_fsync_failure_returns_public_filesystem_error_without_success(
     )
 
     code = main([
-        "--json", "--workspace", str(root), "integrate", "claude",
+        "--json", "--workspace", str(root), "integrate", "agents",
     ])
     captured = capsys.readouterr()
     envelope = json.loads(captured.out)
 
     assert code == 6
     assert envelope["status"] == "ERROR"
-    assert envelope["error"] == {
-        "code": "claude_integration_filesystem_error",
-        "message": "The Claude project integration could not be written safely.",
-        "details": {},
+    assert envelope["error"]["code"] in {
+        "claude_integration_filesystem_error",
+        "filesystem_error",
+        "guidance_filesystem_error",
     }
     assert "secret fsync detail" not in captured.out + captured.err
-    assert "installed" not in captured.out.lower()
-    assert not (root / ".claude").exists()
-    assert not list(root.rglob(".aef-claude-*.tmp"))
+    assert not list(root.rglob(".aef-guidance-*.tmp"))

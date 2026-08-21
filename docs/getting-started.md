@@ -89,15 +89,16 @@ A natural-language request can be simple:
 AEF data remains ordinary JSON and Markdown under `.agent/`, so it can be
 inspected and backed up with the project.
 
-## 5. Optional Claude Code guidance
+## 5. Optional agent guidance doors
 
 ```console
-aef integrate claude
+aef integrate all
 aef integrate claude --status
 ```
 
-This adds a managed segment to `.claude/CLAUDE.md` in the project. It is
-guidance-only, project-scoped, and installs no hooks.
+This installs the shared `AGENTS.md` commun plus root doorbells (`CLAUDE.md`,
+`GEMINI.md`). It is guidance-only, project-scoped, and installs no hooks. An
+existing brownfield `.claude/CLAUDE.md` bridge is left alone.
 
 ## 6. Machine-readable output
 
