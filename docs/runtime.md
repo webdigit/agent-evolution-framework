@@ -14,7 +14,10 @@ aef --json doctor
 ```
 
 `doctor` inspects the runtime. It does not write under `.agent/`, and it does
-not modify an existing virtual environment.
+not modify an existing virtual environment. Without `--install` or
+`--reuse-env`, AEF does not execute third-party binaries found on `PATH`
+(including a binary named `aef`); discovery falls through to the running
+Python module or a tree read of a declared project environment.
 
 ## When the runtime is missing
 
@@ -29,8 +32,8 @@ Propose an isolated, pinned install. Wait for explicit consent. Consent is the
 aef doctor --install
 ```
 
-Without `--install`, AEF does not run `pip`, create a virtual environment, or
-download a package.
+Without `--install`, AEF does not run `pip`, create a virtual environment,
+download a package, or execute third-party binaries from `PATH`.
 
 ## Isolated install
 
@@ -41,7 +44,9 @@ rewritten.
 
 Without `--reuse-env`, `doctor --install` never executes a Python interpreter
 that already existed before this invocation. If `.aef-venv` is occupied, AEF
-creates a fresh environment under a free distinct name or refuses reuse.
+creates a fresh environment under a free distinct name (typically
+`.aef-venv-<platform>`) or refuses reuse. With `--reuse-env`, AEF may probe
+an existing `.aef-venv` **or** `.aef-venv-<platform>` interpreter only.
 
 A local wheel whose hash matches is classified as `verified`. Without a
 matching digest it is `available_unverified` (never plain `available`). Offline

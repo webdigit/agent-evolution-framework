@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
-import venv
 from pathlib import Path
 from typing import Any, Callable
 
 from .runtime_discovery import host_platform, inspect_venv_tree, parse_aef_version_output, workspace_contains
 from .runtime_doctor import (
+    candidate_isolated_env_paths,
     classify_local_artifact,
+    dependency_wheels_present,
     diagnose_runtime,
     isolated_env_name,
+    resolve_fresh_env_path,
     resolve_package_install_spec,
 )
 
@@ -21,6 +24,8 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 PROBE_TIMEOUT = 30
 PIP_TIMEOUT = 300
+VENV_TIMEOUT = 120
+META_DETAIL_MAX = 2048
 
 
 class InstallRefused(RuntimeError):
@@ -33,11 +38,13 @@ class InstallRefused(RuntimeError):
         reason: str,
         diagnosis: dict[str, Any] | None = None,
         detail: str | None = None,
+        created: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.reason = reason
         self.diagnosis = diagnosis
         self.detail = detail
+        self.created = list(created or [])
 
 
 def target_env_path(workspace: Path, venv_status: str) -> Path:
@@ -54,8 +61,20 @@ def venv_python(env_path: Path) -> Path:
 
 
 def _pip_clean_env() -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("PIP_")}
-    return env
+    """Strip PIP_* and PYTHON* so host sitecustomize/path cannot hijack pip."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PIP_") and not key.startswith("PYTHON")
+    }
+
+
+def truncate_detail(text: str | None, limit: int = META_DETAIL_MAX) -> str | None:
+    if text is None:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[:limit]
 
 
 def _run(
@@ -76,6 +95,17 @@ def _run(
     return runner(command, **kwargs)
 
 
+def _remove_env_tree(env_path: Path) -> bool:
+    """Best-effort removal of a freshly created env. True if absent afterwards."""
+    if not env_path.exists():
+        return True
+    try:
+        shutil.rmtree(env_path)
+    except OSError:
+        return not env_path.exists()
+    return not env_path.exists()
+
+
 def _usable_isolated_python(env_path: Path, runner: Runner) -> Path | None:
     if inspect_venv_tree(env_path) != "compatible":
         return None
@@ -85,14 +115,15 @@ def _usable_isolated_python(env_path: Path, runner: Runner) -> Path | None:
     try:
         completed = _run(
             runner,
-            [str(python), "-m", "aef", "--version"],
+            [str(python), "-I", "-m", "aef", "--version"],
             timeout=PROBE_TIMEOUT,
+            env=_pip_clean_env(),
         )
     except subprocess.TimeoutExpired as exc:
         raise InstallRefused(
             "timed out probing existing isolated interpreter",
             reason="probe_timeout",
-            detail=str(exc),
+            detail=truncate_detail(str(exc)),
         ) from exc
     if completed.returncode == 0 and parse_aef_version_output(completed.stdout or ""):
         return python
@@ -100,23 +131,49 @@ def _usable_isolated_python(env_path: Path, runner: Runner) -> Path | None:
 
 
 def _candidate_env_paths(workspace: Path, venv_status: str) -> list[Path]:
-    primary = target_env_path(workspace, venv_status)
-    paths = [primary]
-    platform_named = workspace / isolated_env_name("incompatible")
-    if platform_named != primary:
-        paths.append(platform_named)
-    return paths
+    return candidate_isolated_env_paths(workspace, venv_status)
 
 
 def _fresh_env_path(workspace: Path, venv_status: str) -> Path:
     """Choose a create target that does not reuse a pre-existing interpreter tree."""
-    for candidate in _candidate_env_paths(workspace, venv_status):
-        if not candidate.exists():
-            return candidate
+    chosen = resolve_fresh_env_path(workspace, venv_status)
+    if chosen is not None:
+        return chosen
     raise InstallRefused(
         "refusing to reuse an existing environment without --reuse-env",
         reason="reuse_refused",
     )
+
+
+def _create_venv(env_path: Path, runner: Runner) -> None:
+    """Create venv via the same interpreter shown in the proposed command."""
+    command = [sys.executable, "-m", "venv", str(env_path)]
+    try:
+        completed = _run(runner, command, timeout=VENV_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        _remove_env_tree(env_path)
+        raise InstallRefused(
+            "timed out creating isolated virtual environment",
+            reason="venv_create_timeout",
+            detail=truncate_detail(str(exc)),
+        ) from exc
+    except OSError as exc:
+        _remove_env_tree(env_path)
+        raise InstallRefused(
+            "failed to create isolated virtual environment",
+            reason="venv_create_failed",
+            detail=truncate_detail(str(exc)),
+        ) from exc
+    if completed.returncode != 0:
+        _remove_env_tree(env_path)
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr or stdout or f"exit {completed.returncode}"
+        raise InstallRefused(
+            "failed to create isolated virtual environment",
+            reason="venv_create_failed",
+            detail=truncate_detail(detail),
+        )
 
 
 def install_isolated(
@@ -124,10 +181,12 @@ def install_isolated(
     *,
     consented: bool,
     reuse_env: bool = False,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     **discovery_hooks: Any,
 ) -> dict[str, Any]:
     """Create a new isolated env and install AEF. Never rewrite an existing venv."""
+    if runner is None:
+        runner = subprocess.run
     if not consented:
         raise InstallRefused(
             "install requires explicit --install consent",
@@ -195,24 +254,46 @@ def install_isolated(
             reason="hash_mismatch",
             diagnosis=diagnosis,
         )
-    spec = resolve_package_install_spec(
-        expected_package_version=diagnosis["expected_package_version"],
-        artifact=artifact if artifact in {"verified", "available_unverified"} else "absent",
-        wheel=wheel if artifact in {"verified", "available_unverified"} else None,
+    offline_ready = (
+        artifact == "verified"
+        and wheel is not None
+        and dependency_wheels_present(wheel.parent)
     )
+    if offline_ready:
+        spec = resolve_package_install_spec(
+            expected_package_version=diagnosis["expected_package_version"],
+            artifact="verified",
+            wheel=wheel,
+        )
+    else:
+        spec = resolve_package_install_spec(
+            expected_package_version=diagnosis["expected_package_version"],
+            artifact="absent",
+            wheel=None,
+        )
 
+    created_rel = env_path.name
     try:
-        venv.create(env_path, with_pip=True, symlinks=os.name != "nt")
-    except Exception as exc:  # noqa: BLE001 — surface as refused install
-        raise InstallRefused(
-            "failed to create isolated virtual environment",
-            reason="venv_create_failed",
-            diagnosis=diagnosis,
-            detail=str(exc),
-        ) from exc
+        _create_venv(env_path, runner)
+    except InstallRefused as exc:
+        if exc.diagnosis is None:
+            exc.diagnosis = diagnosis
+        raise
 
     python = venv_python(env_path)
-    command = [str(python), "-m", "pip", "install", *spec.pip_args]
+    command = [str(python), "-I", "-m", "pip", "install", *spec.pip_args]
+
+    def _fail_after_create(reason: str, message: str, detail: str | None) -> None:
+        cleaned = _remove_env_tree(env_path)
+        created = [] if cleaned else [created_rel]
+        raise InstallRefused(
+            message,
+            reason=reason,
+            diagnosis=diagnosis,
+            detail=truncate_detail(detail),
+            created=created,
+        )
+
     try:
         completed = _run(
             runner,
@@ -221,22 +302,13 @@ def install_isolated(
             env=_pip_clean_env(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise InstallRefused(
-            "pip install timed out",
-            reason="pip_timeout",
-            diagnosis=diagnosis,
-            detail=str(exc),
-        ) from exc
+        _fail_after_create("pip_timeout", "pip install timed out", str(exc))
+        raise  # pragma: no cover
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
         detail = stderr or stdout or f"exit {completed.returncode}"
-        raise InstallRefused(
-            "pip install failed",
-            reason="pip_failed",
-            diagnosis=diagnosis,
-            detail=detail,
-        )
+        _fail_after_create("pip_failed", "pip install failed", detail)
     return {
         "changed": True,
         "env_path": str(env_path),
@@ -248,24 +320,33 @@ def install_isolated(
     }
 
 
+def cleanup_failed_install(env_path: Path) -> bool:
+    """Remove an env left after verify failure. True if absent afterwards."""
+    return _remove_env_tree(env_path)
+
+
 def verify_installed(
     python: Path,
     workspace: Path,
     *,
     expected_version: str | None = None,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
 ) -> dict[str, Any]:
+    if runner is None:
+        runner = subprocess.run
+    clean = _pip_clean_env()
     try:
         version = _run(
             runner,
-            [str(python), "-m", "aef", "--version"],
+            [str(python), "-I", "-m", "aef", "--version"],
             timeout=PROBE_TIMEOUT,
+            env=clean,
         )
     except subprocess.TimeoutExpired as exc:
         raise InstallRefused(
             "version probe timed out",
             reason="verify_timeout",
-            detail=str(exc),
+            detail=truncate_detail(str(exc)),
         ) from exc
     reported = parse_aef_version_output(version.stdout or "")
     version_ok = (
@@ -278,14 +359,15 @@ def verify_installed(
         try:
             audit = _run(
                 runner,
-                [str(python), "-m", "aef", "--workspace", str(workspace), "audit"],
+                [str(python), "-I", "-m", "aef", "--workspace", str(workspace), "audit"],
                 timeout=PROBE_TIMEOUT,
+                env=clean,
             )
         except subprocess.TimeoutExpired as exc:
             raise InstallRefused(
                 "audit probe timed out",
                 reason="audit_timeout",
-                detail=str(exc),
+                detail=truncate_detail(str(exc)),
             ) from exc
     return {
         "version_ok": version_ok,

@@ -30,7 +30,13 @@ from .upgrade_plan import MigrationFailure
 from .upgrade_ops import run_upgrade
 from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
 from .runtime_doctor import diagnose_runtime
-from .runtime_install import InstallRefused, install_isolated, verify_installed
+from .runtime_install import (
+    InstallRefused,
+    cleanup_failed_install,
+    install_isolated,
+    truncate_detail,
+    verify_installed,
+)
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -914,8 +920,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reuse-env",
         action="store_true",
         help=(
-            "allow reusing a pre-existing .aef-venv interpreter during --install; "
-            "without this flag a fresh env is created under a free name"
+            "allow probing a pre-existing .aef-venv or .aef-venv-<platform> "
+            "interpreter during --install; without this flag a fresh env is "
+            "created under a free name and existing interpreters are never executed"
         ),
     )
     ingest_parser = commands.add_parser(
@@ -1824,11 +1831,15 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 python, workspace, expected_version=expected,
             )
             if not verification["version_ok"]:
+                env_path = Path(installed["env_path"])
+                cleaned = cleanup_failed_install(env_path)
+                created = [] if cleaned else [env_path.name]
                 raise InstallRefused(
                     "installed runtime version does not match the expected pin",
                     reason="verify_mismatch",
                     diagnosis=installed.get("diagnosis"),
                     detail=verification.get("version_output"),
+                    created=created,
                 )
             rel = Path(installed["env_path"]).name
             diff = {"created": [rel], "modified": [], "removed": []}
@@ -1850,6 +1861,8 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         }
         if result.get("blocked_cause"):
             meta["blocked_cause"] = result["blocked_cause"]
+        if result.get("blocked_path"):
+            meta["blocked_path"] = result["blocked_path"]
         envelope = _envelope(
             command="DOCTOR",
             workspace=workspace,
@@ -2060,10 +2073,19 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         meta = {
             "reason": getattr(exc, "reason", None) or "install_refused",
         }
-        if getattr(exc, "detail", None):
-            meta["detail"] = exc.detail
+        detail = truncate_detail(getattr(exc, "detail", None))
+        if detail:
+            meta["detail"] = detail
         if diagnosis.get("blocked_cause"):
             meta["blocked_cause"] = diagnosis["blocked_cause"]
+        if diagnosis.get("blocked_path"):
+            meta["blocked_path"] = diagnosis["blocked_path"]
+        created = list(getattr(exc, "created", None) or [])
+        diff = (
+            {"created": created, "modified": [], "removed": []}
+            if created
+            else None
+        )
         envelope = _envelope(
             command=str(getattr(args, "command", "doctor")).upper(),
             workspace=args.workspace,
@@ -2072,7 +2094,7 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             dry_run=False,
             result=dict(diagnosis) if isinstance(diagnosis, dict) else {},
             meta=meta,
-            diff=None,
+            diff=diff,
         )
         return envelope, 4
     elif isinstance(exc, ClaudeIntegrationFilesystemError):

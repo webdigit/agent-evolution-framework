@@ -118,18 +118,18 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
 
 
 def parse_aef_version_output(text: str) -> str | None:
-    """Strictly parse `aef --version` / package version output."""
+    """Strictly parse `aef --version` / package version output.
+
+    Requires the exact lowercase prefix ``aef`` then a VERSION_TOKEN.
+    Bare versions and wrong-case prefixes are rejected.
+    """
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     if len(lines) != 1:
         return None
-    line = lines[0]
-    parts = line.split()
-    if len(parts) == 2 and parts[0].lower() == "aef":
-        candidate = parts[1]
-    elif len(parts) == 1:
-        candidate = parts[0]
-    else:
+    parts = lines[0].split()
+    if len(parts) != 2 or parts[0] != "aef":
         return None
+    candidate = parts[1]
     if VERSION_TOKEN.fullmatch(candidate):
         return candidate
     return None
@@ -141,7 +141,10 @@ def probe_path_package_version(
     runner: Runner = subprocess.run,
     timeout: float = PATH_VERSION_TIMEOUT,
 ) -> str | None:
-    """Execute PATH binary --version. Never invent an unobserved version."""
+    """Execute a binary --version under explicit consent (e.g. --reuse-env).
+
+    Default discover_runtime never calls this helper.
+    """
     try:
         completed = runner(
             [str(binary), "--version"],
@@ -174,7 +177,10 @@ def read_expected_package_version(workspace: Path) -> dict[str, Any]:
         return {"status": "invalid", "value": None, "path": rel}
     value = payload["expected_package_version"]
     if isinstance(value, str) and value.strip():
-        return {"status": "valid", "value": value.strip(), "path": rel}
+        stripped = value.strip()
+        if VERSION_TOKEN.fullmatch(stripped):
+            return {"status": "valid", "value": stripped, "path": rel}
+        return {"status": "invalid", "value": None, "path": rel}
     return {"status": "invalid", "value": None, "path": rel}
 
 
@@ -320,20 +326,16 @@ def discover_runtime(
     can_import=None,
     path_version_runner: Runner | None = None,
 ) -> dict[str, Any]:
-    """Deterministic discovery. Never executes a foreign venv binary."""
-    lookup = path_lookup or shutil.which
+    """Deterministic discovery. Never executes a PATH or foreign-venv binary.
+
+    PATH hits are ignored for PASS: default discovery never probes PATH
+    binaries (Lot 2 bis N2). ``path_lookup`` / ``path_version_runner`` remain
+    for API compatibility but do not grant ``discovery_method=path``.
+    Fall through to ``python_module`` (import) or ``declared_env`` (tree read).
+    """
+    _ = path_lookup or shutil.which
+    _ = path_version_runner
     imported = (can_import or module_importable)()
-    path_hit = lookup("aef") or lookup("aef.exe")
-    path_version = None
-    path_ok = False
-    if path_hit:
-        binary = Path(path_hit)
-        if path_binary_compatible(binary):
-            path_version = probe_path_package_version(
-                binary,
-                runner=path_version_runner or subprocess.run,
-            )
-            path_ok = path_version is not None
     venv_status = summarize_venv_status(workspace)
     declared_ready = False
     declared_version = None
@@ -343,10 +345,7 @@ def discover_runtime(
                 declared_ready = True
                 declared_version = read_aef_version_from_tree(candidate)
                 break
-    if path_ok:
-        method = "path"
-        version = path_version
-    elif imported:
+    if imported:
         method = "python_module"
         version = found_package_version(imported=True)
     elif declared_ready:

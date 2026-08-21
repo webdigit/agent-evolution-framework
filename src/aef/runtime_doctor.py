@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -133,22 +134,27 @@ def resolve_package_install_spec(
     artifact: str,
     wheel: Path | None,
 ) -> PackageInstallSpec:
-    """Compute the one install specification shared by propose and execute."""
+    """Compute the one install specification shared by propose and execute.
+
+    Offline ``--no-index`` wheel install is only for ``verified`` wheels.
+    ``available_unverified`` falls through to the PyPI pin.
+    """
     pin = expected_package_version or installed_package_version()
-    if artifact in {"verified", "available_unverified"} and wheel is not None:
-        find_links = wheel.parent
+    if artifact == "verified" and wheel is not None:
+        abs_wheel = wheel.resolve()
+        find_links = abs_wheel.parent
         pip_args = (
             "--isolated",
             "--no-cache-dir",
             "--no-index",
             "--find-links",
             str(find_links),
-            str(wheel),
+            str(abs_wheel),
         )
         return PackageInstallSpec(
             mode="wheel",
             pin_version=pin,
-            wheel=wheel,
+            wheel=abs_wheel,
             find_links=find_links,
             pip_args=pip_args,
         )
@@ -169,18 +175,28 @@ def resolve_package_install_spec(
 
 
 def _quote_command_part(part: str) -> str:
+    """Quote for a human-copyable shell/cmd line.
+
+    POSIX uses shlex.quote. Windows uses cmd.exe rules: wrap in double quotes
+    and double any embedded double quotes.
+    """
     if host_platform() == "windows":
-        return '"' + part.replace('"', '\\"') + '"'
+        return '"' + part.replace('"', '""') + '"'
     return shlex.quote(part)
 
 
-def proposed_install_command_from_spec(spec: PackageInstallSpec, isolated_dir: str) -> str:
-    python = "py -3.11" if host_platform() == "windows" else "python3"
+def proposed_install_command_from_spec(
+    spec: PackageInstallSpec,
+    isolated_dir: str,
+    *,
+    python_executable: str | None = None,
+) -> str:
+    python = _quote_command_part(python_executable or sys.executable)
     env = _quote_command_part(isolated_dir)
     interpreter = _quote_command_part(isolated_dir_python(isolated_dir))
     if spec.mode == "wheel" and spec.wheel is not None:
         find_links = _quote_command_part(str(spec.find_links))
-        artifact = _quote_command_part(spec.wheel.name)
+        artifact = _quote_command_part(str(spec.wheel))
         return (
             f"{python} -m venv {env} && {interpreter} -m pip install "
             f"--isolated --no-cache-dir --no-index --find-links {find_links} {artifact}"
@@ -216,6 +232,24 @@ def isolated_env_name(venv_status: str) -> str:
     return ".aef-venv"
 
 
+def candidate_isolated_env_paths(workspace: Path, venv_status: str) -> list[Path]:
+    """Ordered create/reuse candidates: primary then platform-suffixed name."""
+    primary = workspace / isolated_env_name(venv_status)
+    paths = [primary]
+    platform_named = workspace / isolated_env_name("incompatible")
+    if platform_named != primary:
+        paths.append(platform_named)
+    return paths
+
+
+def resolve_fresh_env_path(workspace: Path, venv_status: str) -> Path | None:
+    """Path ``--install`` would create, or None when every candidate exists."""
+    for candidate in candidate_isolated_env_paths(workspace, venv_status):
+        if not candidate.exists():
+            return candidate
+    return None
+
+
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     workspace = Path(workspace)
     discovered = discover_runtime(workspace, **discovery_hooks)
@@ -231,8 +265,8 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         decision = DECISION_BLOCKED
         blocked_cause = "ambiguous_local_wheels"
     initialized = _workspace_initialized(workspace)
-    env_name = isolated_env_name(discovered["venv_status"])
-    usable_wheel = artifact in {"verified", "available_unverified"}
+    fresh = resolve_fresh_env_path(workspace, discovered["venv_status"])
+    env_name = fresh.name if fresh is not None else isolated_env_name(discovered["venv_status"])
     offline_ready = (
         artifact == "verified"
         and wheel is not None
@@ -242,19 +276,24 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         human_action = False
         network_required = False
         install_command = ""
-        spec = None
     elif decision == DECISION_BLOCKED:
         human_action = False
         network_required = not offline_ready
         install_command = ""
-        spec = None
     else:
         human_action = decision == DECISION_INSTALL_REQUIRED
-        spec = resolve_package_install_spec(
-            expected_package_version=expected,
-            artifact=artifact if usable_wheel else "absent",
-            wheel=wheel if usable_wheel else None,
-        )
+        if offline_ready:
+            spec = resolve_package_install_spec(
+                expected_package_version=expected,
+                artifact="verified",
+                wheel=wheel,
+            )
+        else:
+            spec = resolve_package_install_spec(
+                expected_package_version=expected,
+                artifact="absent",
+                wheel=None,
+            )
         network_required = not offline_ready
         install_command = proposed_install_command_from_spec(spec, env_name)
     result = {

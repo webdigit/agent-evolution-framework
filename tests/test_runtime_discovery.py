@@ -121,14 +121,16 @@ def test_discovery_order_path_then_module_then_declared(tmp_path, monkeypatch):
     def path_version_runner(command, **_kwargs):
         return subprocess.CompletedProcess(command, 0, stdout="aef 1.2.0\n", stderr="")
 
-    path_hit = discover_runtime(
+    # N2: PATH hit must not become discovery_method=path or execute the binary
+    path_ignored = discover_runtime(
         tmp_path,
         path_lookup=lambda name: str(tmp_path / ("aef.exe" if name.endswith(".exe") else "aef")),
         can_import=lambda: False,
         path_version_runner=path_version_runner,
     )
-    assert path_hit["discovery_method"] == "path"
-    assert path_hit["found_package_version"] == "1.2.0"
+    assert path_ignored["discovery_method"] != "path"
+    assert path_ignored["discovery_method"] == "declared_env"
+    assert path_ignored["found_package_version"] == "1.2.0"
 
     module_hit = discover_runtime(
         tmp_path, path_lookup=no_path, can_import=lambda: True,
@@ -203,6 +205,8 @@ def test_unverified_wheel_is_not_presented_as_available(tmp_path):
     assert result["local_artifact"] == "available_unverified"
     assert result["network_required"] is True
     assert result["local_artifact"] != "available"
+    assert "--index-url" in result["install_command"]
+    assert "--no-index" not in result["install_command"]
 
 
 def test_proposed_command_quotes_spaces():
@@ -211,8 +215,9 @@ def test_proposed_command_quotes_spaces():
         version="1.2.0",
         isolated_dir=".aef-venv",
     )
-    assert "python" in command or "py -3.11" in command
+    assert "python" in command.lower() or "py -3.11" in command
     assert "venv" in command
+    assert "agent_evolution_framework-1.2.0 my wheel.whl" in command or "my" in command
 
 
 def test_external_env_is_blocked(tmp_path):

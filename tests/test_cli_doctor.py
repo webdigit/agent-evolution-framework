@@ -41,7 +41,7 @@ def test_json_doctor_reports_ready_runtime(tmp_path, capsys):
     assert envelope["status"] == "PASS"
     assert envelope["ok"] is True
     assert envelope["result"]["decision"] == "OK"
-    assert envelope["result"]["discovery_method"] in {"path", "python_module"}
+    assert envelope["result"]["discovery_method"] == "python_module"
     assert set(RESULT_FIELDS) <= set(envelope["result"])
     assert captured.err == ""
     assert list(tmp_path.iterdir()) == before
@@ -179,4 +179,4 @@ def test_python_module_subprocess_doctor(tmp_path):
     envelope = json.loads(completed.stdout)
     assert envelope["command"] == "DOCTOR"
     assert envelope["status"] == "PASS"
-    assert envelope["result"]["discovery_method"] in {"path", "python_module"}
+    assert envelope["result"]["discovery_method"] == "python_module"

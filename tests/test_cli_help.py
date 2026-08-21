@@ -34,6 +34,8 @@ def test_top_level_help_explains_project_scope_and_machine_output(capsys):
         (["record", "--help"], "declared-fact"),
         (["upgrade", "--help"], "without writing"),
         (["doctor", "--help"], "Does not modify"),
+        (["doctor", "--help"], "reuse-env"),
+        (["doctor", "--help"], ".aef-venv"),
         (["ingest", "--help"], "intake"),
         (["competency", "--help"], "Declare an initial competency"),
         (["competency", "declare", "--help"], "declaration document"),
