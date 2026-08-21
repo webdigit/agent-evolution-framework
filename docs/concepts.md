@@ -22,6 +22,9 @@ lifecycle history remain durable.
 ## Levels and promotion
 
 New competencies start at L1. Career and competency levels are separate.
+Official birth of a competency is a dedicated AEF declaration with a cited
+record and a human decision — not a manual edit of `competencies.json`, and
+not an EVALUATE promotion.
 Outcomes may create durable pending recommendations, but tasks never promote
 directly. EVALUATE recomputes readiness and requires an explicit human decision;
 a promotion advances exactly one level.

@@ -134,6 +134,35 @@ intake is `ERROR` (exit 3).
 
 See [Canonical input files](input-files.md) for an executable example.
 
+## COMPETENCY DECLARE
+
+```console
+aef competency declare --declaration FILE [--dry-run]
+aef --json competency declare --declaration FILE [--dry-run]
+aef competency declare --recover [--dry-run]
+```
+
+Declare the official birth of a competency at **L1** only. The document must
+cite at least one persisted `record_id` with a matching digest and include an
+explicit human decision (`source=human`, `approved=true`). AEF writes
+`.agent/state/competencies.json` and the provenance ledger
+`.agent/state/competency-declarations.json`. It does not rewrite records,
+grant XP, Trust, or permissions, and it is not `evaluate`, `ingest`, or
+`doctor`.
+
+`--json` is global and must precede the command. `--dry-run` projects the L1
+entry without writing. Replaying the same declaration returns `NO_CHANGE`. A
+missing record, digest mismatch, or id collision is `BLOCKED` (exit 4) with no
+write. An invalid document or missing human decision is `ERROR` (exit 3).
+
+Interrupted applies leave a distinct journal
+`.agent/state/competency-declaration-transaction.json`. Recover it with
+`--recover` (start with `--dry-run`). While that journal exists, other
+mutations are blocked. AUDIT reports brownfield competencies without a
+declaration event as a non-blocking warning; it never invents provenance.
+
+See [Canonical input files](input-files.md) for an executable example.
+
 ## Claude integration
 
 ```console

@@ -1,0 +1,20 @@
+{
+  "protocol": "aef.competency.declare.submit/v1",
+  "competency_id": "init-dry-run-review",
+  "title": "INIT dry-run review",
+  "scope": "Review INIT dry-run plans before applying them",
+  "limits": "Does not grant production mutation authority",
+  "rationale": "Official birth after a recorded INIT review",
+  "records": [
+    {
+      "record_id": "review-failed-init",
+      "digest": "sha256:40beb31595e58d27ceef070d74ab003ffc53957a03c18fd9f7b32699d5eb6634"
+    }
+  ],
+  "decision": {
+    "source": "human",
+    "actor": "Alex Example",
+    "decided_at": "2026-08-21T10:00:00Z",
+    "approved": true
+  }
+}

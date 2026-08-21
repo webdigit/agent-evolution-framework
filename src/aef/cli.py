@@ -21,6 +21,7 @@ from .decisions import (
 from .filesystem import (
     EvaluationRecoveryRequiredError,
     UpgradeRecoveryRequiredError,
+    CompetencyDeclarationRecoveryRequiredError,
     apply_workspace,
     load_workspace,
     plan_workspace,
@@ -58,6 +59,12 @@ from .runtime_doctor import diagnose_runtime
 from .runtime_install import InstallRefused, install_isolated, verify_installed
 from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
 from .ingest_ops import plan_ingest
+from .competency_declaration import (
+    CompetencyDeclarationBlockedError,
+    InvalidCompetencyDeclarationError,
+)
+from .competency_declaration_ops import plan_declare, recover_declaration
+from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
 from .operations import (
     InvalidDiscoveryRegistryError,
     InvalidDiscoverySnapshotError,
@@ -202,7 +209,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         status = envelope["status"]
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
-            "RECORD", "UPGRADE", "DOCTOR", "INGEST",
+            "RECORD", "UPGRADE", "DOCTOR", "INGEST", "COMPETENCY_DECLARE",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -219,6 +226,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
                 "BLOCKED", "FAILED", "ERROR",
             },
             "INGEST": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "COMPETENCY_DECLARE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
         }
         if status not in allowed[command]:
             return False
@@ -642,6 +650,55 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Reason    : {reason}\n"
                     f"Workspace : {workspace}\n"
                 )
+        if command == "COMPETENCY_DECLARE":
+            competency_id = _escape_human_value(result.get("competency_id", "unknown"))
+            recovery = result.get("recovery_action")
+            if recovery is not None:
+                if status == "CHANGE":
+                    heading = (
+                        "AEF competency declaration recovery is ready"
+                        if envelope.get("dry_run")
+                        else "AEF competency declaration recovery completed"
+                    )
+                    action = _escape_human_value(recovery)
+                    return (
+                        f"[OK] {heading}\n\n"
+                        f"Action    : {action}\n"
+                        f"Workspace : {workspace}\n"
+                    )
+                if status == "NO_CHANGE":
+                    return (
+                        "[OK] No competency declaration recovery required\n\n"
+                        f"Workspace : {workspace}\n"
+                    )
+            projected = result.get("projected") if isinstance(result.get("projected"), dict) else {}
+            level = _escape_human_value(projected.get("level", "L1"))
+            if status == "CHANGE":
+                heading = (
+                    "AEF competency declaration plan is ready"
+                    if envelope.get("dry_run")
+                    else "AEF declared competency at L1"
+                )
+                return (
+                    f"[OK] {heading}\n\n"
+                    f"Competency: {competency_id}\n"
+                    f"Level     : {level}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF competency declaration is unchanged\n\n"
+                    f"Competency: {competency_id}\n"
+                    f"Workspace : {workspace}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF competency declaration is blocked\n\n"
+                    f"Reason    : {reason}\n"
+                    f"Workspace : {workspace}\n"
+                )
         marker = "FAILED" if status == "FAILED" else "ERROR"
         safe_status = _escape_human_value(status)
         return f"[{marker}] AEF command ended with status {safe_status}\n"
@@ -807,6 +864,38 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="render the exact knowledge plan without writing",
     )
+    competency_parser = commands.add_parser(
+        "competency",
+        help="govern competency birth transitions",
+        description=(
+            "Declare an initial competency at L1 with human approval and cited records. "
+            "Does not promote, grant authority, or write records."
+        ),
+    )
+    competency_commands = competency_parser.add_subparsers(
+        dest="competency_command", required=True,
+    )
+    declare_parser = competency_commands.add_parser(
+        "declare",
+        help="declare a competency at L1",
+        description=(
+            "Validate or apply a competency declaration document. "
+            "Requires persisted records and an explicit human decision. "
+            "Creates L1 only; never XP, Trust, or permissions."
+        ),
+    )
+    declare_parser.add_argument(
+        "--declaration", metavar="FILE",
+        help="competency declaration document",
+    )
+    declare_parser.add_argument(
+        "--recover", action="store_true",
+        help="recover an interrupted competency declaration transaction",
+    )
+    declare_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="render the exact competency plan without writing",
+    )
     return parser
 
 
@@ -821,6 +910,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error("argument --check: not allowed with argument --recover")
     if args.command == "upgrade" and args.check and args.dry_run:
         parser.error("argument --check: not allowed with argument --dry-run")
+    if args.command == "competency" and args.competency_command == "declare":
+        if args.recover and args.declaration:
+            parser.error("argument --declaration: not allowed with argument --recover")
+        if not args.recover and not args.declaration:
+            parser.error("argument --declaration is required unless --recover is set")
+
     return args
 
 
@@ -1389,6 +1484,8 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_doctor(args)
     if args.command == "ingest":
         return _run_ingest(args)
+    if args.command == "competency":
+        return _run_competency_declare(args)
     return _run_evaluate(args)
 
 
@@ -1400,6 +1497,51 @@ def _load_intake(path: str | Path) -> Any:
             "invalid_json",
             "The ingest document is not valid JSON.",
         ) from exc
+
+def _load_declaration(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The competency declaration document is not valid JSON.",
+        ) from exc
+
+def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    try:
+        if args.recover:
+            status, result, meta, diff = recover_declaration(
+                workspace, dry_run=args.dry_run,
+            )
+        else:
+            document = _load_declaration(args.declaration)
+            status, result, meta, diff = plan_declare(
+                workspace, document, dry_run=args.dry_run,
+            )
+    except CompetencyDeclarationBlockedError as exc:
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("COMPETENCY_DECLARE", "BLOCKED")
+    envelope = _envelope(
+        command="COMPETENCY_DECLARE",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("COMPETENCY_DECLARE", status)
 
 def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
@@ -1632,6 +1774,41 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 4
+    elif isinstance(exc, InvalidCompetencyDeclarationError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, CompetencyDeclarationBlockedError):
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE",
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, InvalidCompetencyDeclarationTransactionError):
+        code = "invalid_competency_declaration_transaction"
+        message = "The competency declaration transaction is invalid."
+        details = {}
+        exit_code = 3
+    elif isinstance(exc, CompetencyDeclarationRecoveryRequiredError):
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE" if getattr(args, "command", "") == "competency"
+            else str(getattr(args, "command", "unknown")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": "competency_declaration_recovery_required"},
+            diff=None,
+        )
+        return envelope, 4
     elif isinstance(exc, InstallRefused):
         envelope = _envelope(
             command=str(getattr(args, "command", "doctor")).upper(),
@@ -1669,8 +1846,11 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         message = "An unexpected internal error occurred."
         details = {}
         exit_code = 70
+    command_name = args.command.upper()
+    if args.command == "competency":
+        command_name = "COMPETENCY_DECLARE"
     envelope = _envelope(
-        command=args.command.upper(),
+        command=command_name,
         workspace=args.workspace,
         status="ERROR",
         ok=False,

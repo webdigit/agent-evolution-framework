@@ -16,6 +16,7 @@ from aef.knowledge_state import validate_knowledge_state
 from aef.operations import validate_discovery_snapshot
 from aef.promotion_recommendations import validate_evaluation_state
 from aef.ingest_intake import validate_ingest_submission
+from aef.competency_declaration import validate_competency_declaration
 from aef.record_document import build_persisted_record, validate_record_submission
 from aef.schema_validation import draft202012_validator, load_packaged_schema
 from aef.strict_json import validate_strict_json
@@ -202,6 +203,7 @@ def test_documentation_links_and_command_claims_are_current():
         "evaluate --recover --dry-run",
         "record --recording FILE [--dry-run]",
         "ingest --intake FILE [--dry-run]",
+        "competency declare --declaration FILE [--dry-run]",
     ):
         assert fragment in commands or fragment in guide
     assert "Canonical input files" in readme
@@ -381,3 +383,8 @@ def test_ingest_example_document_validates_against_intake_contract():
     intake = validate_ingest_submission(_document("ingest.json"))
     assert intake["protocol"] == "aef.ingest.submit/v1"
     assert intake["records"]
+
+def test_competency_declaration_example_validates_against_declare_contract():
+    declaration = validate_competency_declaration(_document("competency-declaration.json"))
+    assert declaration["protocol"] == "aef.competency.declare.submit/v1"
+    assert declaration["competency_id"]

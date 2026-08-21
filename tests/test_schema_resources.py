@@ -16,6 +16,7 @@ SCHEMA_NAMES = {
     "migrations.schema.json",
     "policies.schema.json",
     "ingest-submission.schema.json",
+    "competency-declaration-submission.schema.json",
     "record-submission.schema.json",
     "record.schema.json",
     "supervision.schema.json",

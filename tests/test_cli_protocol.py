@@ -133,6 +133,9 @@ def test_final_output_boundary_never_retries_or_leaks(
     ("INGEST", "CHANGE", 0),
     ("INGEST", "NO_CHANGE", 0),
     ("INGEST", "BLOCKED", 4),
+    ("COMPETENCY_DECLARE", "CHANGE", 0),
+    ("COMPETENCY_DECLARE", "NO_CHANGE", 0),
+    ("COMPETENCY_DECLARE", "BLOCKED", 4),
 ])
 def test_protocol_exit_code_mapping(command, status, expected):
     assert cli._exit_code(command, status) == expected

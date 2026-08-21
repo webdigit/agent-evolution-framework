@@ -390,11 +390,13 @@ def audit_project(project, root=None):
             findings.append({"id": "invalid-knowledge-state", "severity": "error"})
     from .record_audit import audit_records_directory, audit_records_in_files
     from .ingest_ops import audit_ingest_provenance
+    from .competency_declaration_ops import audit_declaration_provenance
     if root is not None:
         findings.extend(audit_records_directory(root))
     else:
         findings.extend(audit_records_in_files(files))
     findings.extend(audit_ingest_provenance(project, root=root))
+    findings.extend(audit_declaration_provenance(project, root=root))
     return {
         "status": "PASS" if not any(f["severity"] == "error" for f in findings) else "FAIL",
         "schema_version": manifest.get("schema_version") if manifest else None,

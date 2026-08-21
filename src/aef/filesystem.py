@@ -25,6 +25,9 @@ JSON_PATHS = {
 }
 EVALUATION_TRANSACTION_PATH = ".agent/state/evaluation-transaction.json"
 UPGRADE_TRANSACTION_PATH = ".agent/state/upgrade-transaction.json"
+COMPETENCY_DECLARATION_TRANSACTION_PATH = (
+    ".agent/state/competency-declaration-transaction.json"
+)
 RECORDS_DIRECTORY = ".agent/records"
 
 WINDOWS_RESERVED_NAMES = {
@@ -48,6 +51,12 @@ class UpgradeRecoveryRequiredError(RuntimeError):
     """Raised when ordinary writes encounter an unfinished UPGRADE transaction."""
 
     code = "upgrade_recovery_required"
+
+
+class CompetencyDeclarationRecoveryRequiredError(RuntimeError):
+    """Raised when ordinary writes encounter an unfinished declaration transaction."""
+
+    code = "competency_declaration_recovery_required"
 
 
 TRANSACTION_BUSINESS_PATHS = frozenset({
@@ -194,6 +203,17 @@ def _evaluation_transaction_entry_present(root: Path) -> bool:
 
 def _upgrade_transaction_entry_present(root: Path) -> bool:
     path = root.joinpath(*UPGRADE_TRANSACTION_PATH.split("/"))
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _competency_declaration_transaction_entry_present(root: Path) -> bool:
+    path = root.joinpath(*COMPETENCY_DECLARATION_TRANSACTION_PATH.split("/"))
     try:
         os.lstat(path)
     except FileNotFoundError:
@@ -620,6 +640,14 @@ def apply_workspace(
     if _upgrade_transaction_entry_present(root):
         raise UpgradeRecoveryRequiredError(
             "upgrade recovery is required before workspace mutation"
+        )
+    if COMPETENCY_DECLARATION_TRANSACTION_PATH in current_files:
+        raise CompetencyDeclarationRecoveryRequiredError(
+            "competency declaration recovery is required before workspace mutation"
+        )
+    if _competency_declaration_transaction_entry_present(root):
+        raise CompetencyDeclarationRecoveryRequiredError(
+            "competency declaration recovery is required before workspace mutation"
         )
     return _apply_workspace_unchecked(
         root, current, desired, allow_delete=allow_delete

@@ -29,6 +29,10 @@ from .record_document import (
     validate_persisted_record,
 )
 from .schema_validation import validate_persisted_knowledge
+from .competency_declaration_transaction import (
+    declaration_transaction_entry_present,
+    declaration_transaction_present,
+)
 from .transaction_guard import evaluation_recovery_required
 from .upgrade_transaction import (
     upgrade_transaction_entry_present,
@@ -67,6 +71,11 @@ def _guard_transactions(root: Path, current: dict[str, Any]) -> None:
         raise IngestBlockedError(
             "evaluation_recovery_required",
             "evaluation recovery is required before workspace mutation",
+        )
+    if declaration_transaction_present(current) or declaration_transaction_entry_present(root):
+        raise IngestBlockedError(
+            "competency_declaration_recovery_required",
+            "competency declaration recovery is required before workspace mutation",
         )
 
 

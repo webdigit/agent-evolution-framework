@@ -75,6 +75,10 @@ existing file.
 To derive signals from that journal, cite the persisted record in a separate
 intake and run `aef ingest --intake FILE`. RECORD itself does not learn.
 
+To officially birth a competency at L1, cite the same record from a declaration
+document and run `aef competency declare --declaration FILE`. That command is
+not a promotion and does not edit competencies by hand.
+
 ## 4. Use AEF with an agent
 
 A natural-language request can be simple:

@@ -32,6 +32,8 @@ def test_top_level_help_explains_project_scope_and_machine_output(capsys):
         (["upgrade", "--help"], "without writing"),
         (["doctor", "--help"], "Does not modify"),
         (["ingest", "--help"], "intake"),
+        (["competency", "--help"], "Declare an initial competency"),
+        (["competency", "declare", "--help"], "declaration document"),
     ],
 )
 def test_command_help_describes_the_available_contract(arguments, expected, capsys):

@@ -32,6 +32,7 @@ def _sdist(path, extra=(), extra_named=None, duplicates=(), extra_infos=()):
         "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/ingest.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/competency-declaration.json": b"{}",
         **{
             f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
             for schema in SCHEMAS
@@ -82,6 +83,7 @@ def test_record_runtime_schemas_are_required_in_artifact_contract():
         "record-submission.schema.json",
         "record.schema.json",
         "ingest-submission.schema.json",
+        "competency-declaration-submission.schema.json",
     } <= SCHEMAS
 
 

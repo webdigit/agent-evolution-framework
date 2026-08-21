@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/competency-declaration-submission.schema.json",
+  "title": "AEF Competency Declaration Submission",
+  "description": "Human-approved birth of a competency at L1. Cites persisted aef.record/v1 files. Does not write records or grant authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "competency_id",
+    "title",
+    "scope",
+    "limits",
+    "rationale",
+    "records",
+    "decision"
+  ],
+  "properties": {
+    "protocol": {"const": "aef.competency.declare.submit/v1"},
+    "competency_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "scope": {"type": "string", "minLength": 1},
+    "limits": {"type": "string", "minLength": 1},
+    "rationale": {"type": "string", "minLength": 1},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/citation"}
+    },
+    "decision": {"$ref": "#/$defs/humanDecision"}
+  },
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "digest"],
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "humanDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "actor", "decided_at", "approved"],
+      "properties": {
+        "source": {"const": "human"},
+        "actor": {"type": "string", "minLength": 1},
+        "decided_at": {"type": "string", "minLength": 1},
+        "approved": {"const": true}
+      }
+    }
+  }
+}
