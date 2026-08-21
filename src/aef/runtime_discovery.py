@@ -7,9 +7,9 @@ import os
 import platform
 import re
 import shutil
-import sys
+import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ._version import __version__
 
@@ -23,7 +23,11 @@ RUNTIME_REQUIREMENTS_PATH = ".agent/runtime-requirements.json"
 CANDIDATE_VENV_NAMES = (".aef-venv", ".venv", "venv")
 WHEEL_NAME_PREFIX = "agent_evolution_framework-"
 VERSION_PATTERN = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.M)
+VERSION_TOKEN = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z._+-]*$")
 WINDOWS_HOME = re.compile(r"^[A-Za-z]:[\\/]")
+PATH_VERSION_TIMEOUT = 10
+
+Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def host_platform() -> str:
@@ -113,20 +117,65 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
     return __version__
 
 
-def read_expected_package_version(workspace: Path) -> str | None:
-    path = workspace / RUNTIME_REQUIREMENTS_PATH
-    if not path.is_file():
+def parse_aef_version_output(text: str) -> str | None:
+    """Strictly parse `aef --version` / package version output."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) != 1:
         return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
+    line = lines[0]
+    parts = line.split()
+    if len(parts) == 2 and parts[0].lower() == "aef":
+        candidate = parts[1]
+    elif len(parts) == 1:
+        candidate = parts[0]
+    else:
         return None
-    if not isinstance(payload, dict):
-        return None
-    value = payload.get("expected_package_version")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    if VERSION_TOKEN.fullmatch(candidate):
+        return candidate
     return None
+
+
+def probe_path_package_version(
+    binary: Path,
+    *,
+    runner: Runner = subprocess.run,
+    timeout: float = PATH_VERSION_TIMEOUT,
+) -> str | None:
+    """Execute PATH binary --version. Never invent an unobserved version."""
+    try:
+        completed = runner(
+            [str(binary), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    return parse_aef_version_output(completed.stdout or "")
+
+
+def read_expected_package_version(workspace: Path) -> dict[str, Any]:
+    """Distinguish absent / valid / invalid expected package version."""
+    rel = RUNTIME_REQUIREMENTS_PATH
+    path = workspace / rel
+    if not path.is_file():
+        return {"status": "absent", "value": None, "path": rel}
+    try:
+        text = path.read_text(encoding="utf-8")
+        payload = json.loads(text)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return {"status": "invalid", "value": None, "path": rel}
+    if not isinstance(payload, dict):
+        return {"status": "invalid", "value": None, "path": rel}
+    if "expected_package_version" not in payload:
+        return {"status": "invalid", "value": None, "path": rel}
+    value = payload["expected_package_version"]
+    if isinstance(value, str) and value.strip():
+        return {"status": "valid", "value": value.strip(), "path": rel}
+    return {"status": "invalid", "value": None, "path": rel}
 
 
 def _aef_package_roots(venv: Path) -> list[Path]:
@@ -198,6 +247,19 @@ def summarize_venv_status(workspace: Path) -> str:
     return "unknown"
 
 
+def wheel_version_from_filename(name: str) -> str | None:
+    if not name.startswith(WHEEL_NAME_PREFIX) or not name.endswith(".whl"):
+        return None
+    body = name[len(WHEEL_NAME_PREFIX) : -4]
+    parts = body.split("-")
+    if len(parts) < 4:
+        return None
+    version = "-".join(parts[:-3])
+    if VERSION_TOKEN.fullmatch(version):
+        return version
+    return None
+
+
 def find_local_wheels(workspace: Path) -> list[Path]:
     wheels: list[Path] = []
     for folder in (workspace, workspace / "dist"):
@@ -212,20 +274,66 @@ def find_local_wheels(workspace: Path) -> list[Path]:
     return sorted(wheels)
 
 
+def select_local_wheel(
+    workspace: Path,
+    *,
+    expected_version: str | None,
+) -> dict[str, Any]:
+    """Pick a single wheel or report ambiguity / absence."""
+    wheels = find_local_wheels(workspace)
+    if not wheels:
+        return {"status": "absent", "wheel": None, "candidates": []}
+    if expected_version is not None:
+        matched = [
+            wheel
+            for wheel in wheels
+            if wheel_version_from_filename(wheel.name) == expected_version
+        ]
+        if len(matched) == 1:
+            return {"status": "selected", "wheel": matched[0], "candidates": matched}
+        if len(matched) > 1:
+            return {
+                "status": "ambiguous",
+                "wheel": None,
+                "candidates": matched,
+            }
+        if len(wheels) > 1:
+            return {
+                "status": "ambiguous",
+                "wheel": None,
+                "candidates": wheels,
+            }
+        return {"status": "absent", "wheel": None, "candidates": wheels}
+    if len(wheels) == 1:
+        return {"status": "selected", "wheel": wheels[0], "candidates": wheels}
+    return {
+        "status": "ambiguous",
+        "wheel": None,
+        "candidates": wheels,
+    }
+
+
 def discover_runtime(
     workspace: Path,
     *,
     path_lookup=None,
     can_import=None,
+    path_version_runner: Runner | None = None,
 ) -> dict[str, Any]:
     """Deterministic discovery. Never executes a foreign venv binary."""
     lookup = path_lookup or shutil.which
     imported = (can_import or module_importable)()
     path_hit = lookup("aef") or lookup("aef.exe")
+    path_version = None
     path_ok = False
     if path_hit:
         binary = Path(path_hit)
-        path_ok = path_binary_compatible(binary)
+        if path_binary_compatible(binary):
+            path_version = probe_path_package_version(
+                binary,
+                runner=path_version_runner or subprocess.run,
+            )
+            path_ok = path_version is not None
     venv_status = summarize_venv_status(workspace)
     declared_ready = False
     declared_version = None
@@ -237,7 +345,7 @@ def discover_runtime(
                 break
     if path_ok:
         method = "path"
-        version = found_package_version(imported=imported) or declared_version
+        version = path_version
     elif imported:
         method = "python_module"
         version = found_package_version(imported=True)
@@ -247,20 +355,39 @@ def discover_runtime(
     else:
         method = "none"
         version = None
-    expected = read_expected_package_version(workspace)
+    expected_info = read_expected_package_version(workspace)
+    if expected_info["status"] == "invalid":
+        return {
+            "discovery_method": method,
+            "found_package_version": version,
+            "expected_package_version": None,
+            "expected_version_status": "invalid",
+            "venv_status": venv_status if venv_status != "blocked" else "blocked",
+            "external_env": venv_status == "blocked",
+            "blocked_cause": "invalid_expected_package_version",
+            "blocked_path": expected_info["path"],
+            "decision": DECISION_BLOCKED,
+        }
+    expected = expected_info["value"]
     version_ok = version is not None and (expected is None or version == expected)
     usable = method != "none" and version_ok and venv_status != "blocked"
     if venv_status == "blocked":
         decision = DECISION_BLOCKED
+        blocked_cause = "external_env"
     elif usable:
         decision = DECISION_OK
+        blocked_cause = None
     else:
         decision = DECISION_INSTALL_REQUIRED
+        blocked_cause = None
     return {
         "discovery_method": method,
         "found_package_version": version,
         "expected_package_version": expected,
-        "venv_status": "unknown" if venv_status == "blocked" else venv_status,
+        "expected_version_status": expected_info["status"],
+        "venv_status": venv_status,
         "external_env": venv_status == "blocked",
+        "blocked_cause": blocked_cause,
+        "blocked_path": expected_info["path"] if blocked_cause == "invalid_expected_package_version" else None,
         "decision": decision,
     }

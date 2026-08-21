@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +13,16 @@ from .runtime_discovery import (
     DECISION_INSTALL_REQUIRED,
     DECISION_OK,
     discover_runtime,
-    find_local_wheels,
     host_architecture,
     host_platform,
     interpreter_label,
+    select_local_wheel,
     workspace_contains,
 )
 from .upgrade_compat import installed_package_version
+
+PYPI_INDEX_URL = "https://pypi.org/simple"
+JSONSCHEMA_WHEEL_PREFIX = "jsonschema-"
 
 DOCTOR_RESULT_FIELDS = (
     "platform",
@@ -34,7 +38,20 @@ DOCTOR_RESULT_FIELDS = (
     "human_action_required",
     "install_command",
     "decision",
+    "blocked_cause",
+    "blocked_path",
 )
+
+
+@dataclass(frozen=True)
+class PackageInstallSpec:
+    """Single source of truth for proposed and executed package install."""
+
+    mode: str  # "wheel" | "pypi"
+    pin_version: str
+    wheel: Path | None
+    find_links: Path | None
+    pip_args: tuple[str, ...]
 
 
 def _workspace_initialized(workspace: Path) -> bool | None:
@@ -73,21 +90,82 @@ def _expected_hash(wheel: Path) -> str | None:
     return None
 
 
-def classify_local_artifact(workspace: Path) -> tuple[str, Path | None]:
-    wheels = find_local_wheels(workspace)
-    if not wheels:
-        return "absent", None
-    wheel = wheels[0]
+def dependency_wheels_present(directory: Path) -> bool:
+    """Offline install needs at least jsonschema among dependency wheels."""
+    if not directory.is_dir():
+        return False
+    for item in directory.iterdir():
+        if item.is_file() and item.name.startswith(JSONSCHEMA_WHEEL_PREFIX) and item.suffix == ".whl":
+            return True
+    return False
+
+
+def classify_local_artifact(
+    workspace: Path,
+    *,
+    expected_version: str | None = None,
+) -> tuple[str, Path | None, list[Path]]:
+    """Return (classification, wheel, candidates).
+
+    Classifications: absent | verified | available_unverified | hash_mismatch | ambiguous
+    """
+    selection = select_local_wheel(workspace, expected_version=expected_version)
+    if selection["status"] == "ambiguous":
+        return "ambiguous", None, list(selection["candidates"])
+    if selection["status"] != "selected" or selection["wheel"] is None:
+        return "absent", None, list(selection["candidates"])
+    wheel = selection["wheel"]
     expected = _expected_hash(wheel)
     if expected is None:
-        return "available", wheel
+        return "available_unverified", wheel, [wheel]
     try:
         actual = _hash_file(wheel)
     except OSError:
-        return "absent", None
+        return "absent", None, [wheel]
     if actual == expected:
-        return "available", wheel
-    return "hash_mismatch", wheel
+        return "verified", wheel, [wheel]
+    return "hash_mismatch", wheel, [wheel]
+
+
+def resolve_package_install_spec(
+    *,
+    expected_package_version: str | None,
+    artifact: str,
+    wheel: Path | None,
+) -> PackageInstallSpec:
+    """Compute the one install specification shared by propose and execute."""
+    pin = expected_package_version or installed_package_version()
+    if artifact in {"verified", "available_unverified"} and wheel is not None:
+        find_links = wheel.parent
+        pip_args = (
+            "--isolated",
+            "--no-cache-dir",
+            "--no-index",
+            "--find-links",
+            str(find_links),
+            str(wheel),
+        )
+        return PackageInstallSpec(
+            mode="wheel",
+            pin_version=pin,
+            wheel=wheel,
+            find_links=find_links,
+            pip_args=pip_args,
+        )
+    pip_args = (
+        "--isolated",
+        "--no-cache-dir",
+        "--index-url",
+        PYPI_INDEX_URL,
+        f"agent-evolution-framework=={pin}",
+    )
+    return PackageInstallSpec(
+        mode="pypi",
+        pin_version=pin,
+        wheel=None,
+        find_links=None,
+        pip_args=pip_args,
+    )
 
 
 def _quote_command_part(part: str) -> str:
@@ -96,15 +174,34 @@ def _quote_command_part(part: str) -> str:
     return shlex.quote(part)
 
 
-def proposed_install_command(*, wheel: Path | None, version: str, isolated_dir: str) -> str:
+def proposed_install_command_from_spec(spec: PackageInstallSpec, isolated_dir: str) -> str:
     python = "py -3.11" if host_platform() == "windows" else "python3"
     env = _quote_command_part(isolated_dir)
     interpreter = _quote_command_part(isolated_dir_python(isolated_dir))
-    if wheel is not None:
-        artifact = _quote_command_part(wheel.name)
-        return f"{python} -m venv {env} && {interpreter} -m pip install --no-index {artifact}"
-    pin = _quote_command_part(f"agent-evolution-framework=={version}")
-    return f"{python} -m venv {env} && {interpreter} -m pip install {pin}"
+    if spec.mode == "wheel" and spec.wheel is not None:
+        find_links = _quote_command_part(str(spec.find_links))
+        artifact = _quote_command_part(spec.wheel.name)
+        return (
+            f"{python} -m venv {env} && {interpreter} -m pip install "
+            f"--isolated --no-cache-dir --no-index --find-links {find_links} {artifact}"
+        )
+    pin = _quote_command_part(f"agent-evolution-framework=={spec.pin_version}")
+    index = _quote_command_part(PYPI_INDEX_URL)
+    return (
+        f"{python} -m venv {env} && {interpreter} -m pip install "
+        f"--isolated --no-cache-dir --index-url {index} {pin}"
+    )
+
+
+def proposed_install_command(*, wheel: Path | None, version: str, isolated_dir: str) -> str:
+    """Back-compat wrapper; prefer resolve_package_install_spec + from_spec."""
+    artifact = "verified" if wheel is not None else "absent"
+    spec = resolve_package_install_spec(
+        expected_package_version=version,
+        artifact=artifact,
+        wheel=wheel,
+    )
+    return proposed_install_command_from_spec(spec, isolated_dir)
 
 
 def isolated_dir_python(isolated_dir: str) -> str:
@@ -122,33 +219,51 @@ def isolated_env_name(venv_status: str) -> str:
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     workspace = Path(workspace)
     discovered = discover_runtime(workspace, **discovery_hooks)
-    if discovered["external_env"]:
+    decision = discovered["decision"]
+    if discovered.get("external_env") and decision != DECISION_BLOCKED:
         decision = DECISION_BLOCKED
-    else:
-        decision = discovered["decision"]
-    artifact, wheel = classify_local_artifact(workspace)
+    expected = discovered["expected_package_version"]
+    artifact, wheel, candidates = classify_local_artifact(
+        workspace, expected_version=expected,
+    )
+    blocked_cause = discovered.get("blocked_cause")
+    if artifact == "ambiguous" and decision != DECISION_BLOCKED:
+        decision = DECISION_BLOCKED
+        blocked_cause = "ambiguous_local_wheels"
     initialized = _workspace_initialized(workspace)
-    version = discovered["expected_package_version"] or installed_package_version()
     env_name = isolated_env_name(discovered["venv_status"])
-    network_required = artifact != "available"
-    install_command = proposed_install_command(
-        wheel=wheel if artifact == "available" else None,
-        version=version,
-        isolated_dir=env_name,
+    usable_wheel = artifact in {"verified", "available_unverified"}
+    offline_ready = (
+        artifact == "verified"
+        and wheel is not None
+        and dependency_wheels_present(wheel.parent)
     )
     if decision == DECISION_OK:
         human_action = False
         network_required = False
         install_command = ""
+        spec = None
+    elif decision == DECISION_BLOCKED:
+        human_action = False
+        network_required = not offline_ready
+        install_command = ""
+        spec = None
     else:
         human_action = decision == DECISION_INSTALL_REQUIRED
-    return {
+        spec = resolve_package_install_spec(
+            expected_package_version=expected,
+            artifact=artifact if usable_wheel else "absent",
+            wheel=wheel if usable_wheel else None,
+        )
+        network_required = not offline_ready
+        install_command = proposed_install_command_from_spec(spec, env_name)
+    result = {
         "platform": host_platform(),
         "architecture": host_architecture(),
         "interpreter": interpreter_label(),
         "discovery_method": discovered["discovery_method"],
         "found_package_version": discovered["found_package_version"],
-        "expected_package_version": discovered["expected_package_version"],
+        "expected_package_version": expected,
         "workspace_compatible": initialized if initialized is not None else "unknown",
         "venv_status": discovered["venv_status"],
         "network_required": network_required,
@@ -156,4 +271,15 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "human_action_required": human_action,
         "install_command": install_command,
         "decision": decision,
+        "blocked_cause": blocked_cause,
+        "blocked_path": (
+            discovered.get("blocked_path")
+            if blocked_cause == "invalid_expected_package_version"
+            else (
+                ",".join(path.name for path in candidates)
+                if blocked_cause == "ambiguous_local_wheels"
+                else None
+            )
+        ),
     }
+    return result

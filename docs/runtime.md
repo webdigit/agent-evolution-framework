@@ -39,18 +39,32 @@ name already holds an environment from another platform, AEF uses
 `.aef-venv-<platform>` instead. An existing `.venv` or `.aef-venv` is never
 rewritten.
 
-A local wheel whose hash matches is installed offline:
+Without `--reuse-env`, `doctor --install` never executes a Python interpreter
+that already existed before this invocation. If `.aef-venv` is occupied, AEF
+creates a fresh environment under a free distinct name or refuses reuse.
+
+A local wheel whose hash matches is classified as `verified`. Without a
+matching digest it is `available_unverified` (never plain `available`). Offline
+`network_required: false` additionally requires dependency wheels in the same
+find-links directory (at least `jsonschema*.whl`):
 
 ```console
 python -m venv .aef-venv
-python -m pip install --no-index agent_evolution_framework-*.whl
+python -m pip install --isolated --no-cache-dir --no-index --find-links . agent_evolution_framework-*.whl
 ```
 
-Otherwise the proposed command pins the package:
+Otherwise the proposed command pins the package against the public index:
 
 ```console
 python -m venv .aef-venv
-python -m pip install "agent-evolution-framework==<pinned-version>"
+python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
+```
+
+Consent flags:
+
+```console
+aef doctor --install
+aef doctor --install --reuse-env
 ```
 
 On Windows, `py -3.11 -m venv` and `.aef-venv\Scripts\python.exe` are the

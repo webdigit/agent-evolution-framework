@@ -38,16 +38,27 @@ def test_doctor_and_install_never_leak_exterior_sentinels(tmp_path, capsys, monk
     write_venv(workspace / ".venv", kind="windows")
     (workspace / "AGENTS.md").write_text("user bootstrap\n", encoding="utf-8")
 
-    for args in (("doctor",), ("doctor", "--install")):
-        code, envelope, captured = invoke(
-            capsys, "--json", "--workspace", str(workspace), *args,
-        )
-        dumped = json.dumps(envelope) + captured.out + captured.err
-        assert SENTINEL not in dumped
-        assert SENTINEL_PATH not in dumped
-        assert str(exterior) not in dumped
-        assert str(Path.home()) not in dumped
-        assert code in {0, 4, 8}
+    code, envelope, captured = invoke(
+        capsys, "--json", "--workspace", str(workspace), "doctor",
+    )
+    dumped = json.dumps(envelope) + captured.out + captured.err
+    assert SENTINEL not in dumped
+    assert SENTINEL_PATH not in dumped
+    assert str(exterior) not in dumped
+    assert str(Path.home()) not in dumped
+    assert code == 0
+    assert envelope["status"] == "PASS"
+
+    code, envelope, captured = invoke(
+        capsys, "--json", "--workspace", str(workspace), "doctor", "--install",
+    )
+    dumped = json.dumps(envelope) + captured.out + captured.err
+    assert SENTINEL not in dumped
+    assert SENTINEL_PATH not in dumped
+    assert str(exterior) not in dumped
+    assert str(Path.home()) not in dumped
+    assert code == 0
+    assert envelope["status"] == "NO_CHANGE"
     assert (workspace / "AGENTS.md").read_text(encoding="utf-8") == "user bootstrap\n"
     assert list(exterior.iterdir())
 

@@ -58,7 +58,9 @@ def test_expected_package_version_is_not_framework_or_schema(tmp_path):
         json.dumps({"framework_version": "1.0.0", "schema_version": "1.0.0"}),
         encoding="utf-8",
     )
-    assert read_expected_package_version(tmp_path) == "1.2.0"
+    expected = read_expected_package_version(tmp_path)
+    assert expected["status"] == "valid"
+    assert expected["value"] == "1.2.0"
     discovered = discover_runtime(
         tmp_path, path_lookup=no_path, can_import=lambda: False,
     )
@@ -115,10 +117,15 @@ def test_discovery_order_path_then_module_then_declared(tmp_path, monkeypatch):
         "aef.runtime_discovery.path_binary_compatible",
         lambda path: path.name.lower() in {"aef", "aef.exe"},
     )
+
+    def path_version_runner(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout="aef 1.2.0\n", stderr="")
+
     path_hit = discover_runtime(
         tmp_path,
         path_lookup=lambda name: str(tmp_path / ("aef.exe" if name.endswith(".exe") else "aef")),
         can_import=lambda: False,
+        path_version_runner=path_version_runner,
     )
     assert path_hit["discovery_method"] == "path"
     assert path_hit["found_package_version"] == "1.2.0"
@@ -162,7 +169,10 @@ def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
     assert result["human_action_required"] is True
     assert result["network_required"] is True
     assert result["local_artifact"] == "absent"
+    assert result["blocked_cause"] is None
     assert "agent-evolution-framework==" in result["install_command"]
+    assert "--index-url" in result["install_command"]
+    assert "https://pypi.org/simple" in result["install_command"]
     assert str(Path.home()) not in json.dumps(result)
     assert interpreter_label().startswith(("CPython-", "PyPy-"))
     assert "\\" not in interpreter_label() or "CPython-" in interpreter_label()
@@ -170,13 +180,29 @@ def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
 
 def test_local_wheel_announces_offline_install(tmp_path):
     wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    payload = b"wheel"
+    wheel.write_bytes(payload)
+    import hashlib
+    digest = hashlib.sha256(payload).hexdigest()
+    (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    (tmp_path / "jsonschema-4.0.0-py3-none-any.whl").write_bytes(b"dep")
+    result = diagnose_runtime(
+        tmp_path, path_lookup=no_path, can_import=lambda: False,
+    )
+    assert result["local_artifact"] == "verified"
+    assert result["network_required"] is False
+    assert "--no-index" in result["install_command"]
+
+
+def test_unverified_wheel_is_not_presented_as_available(tmp_path):
+    wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     wheel.write_bytes(b"wheel")
     result = diagnose_runtime(
         tmp_path, path_lookup=no_path, can_import=lambda: False,
     )
-    assert result["local_artifact"] == "available"
-    assert result["network_required"] is False
-    assert "--no-index" in result["install_command"]
+    assert result["local_artifact"] == "available_unverified"
+    assert result["network_required"] is True
+    assert result["local_artifact"] != "available"
 
 
 def test_proposed_command_quotes_spaces():
@@ -204,3 +230,5 @@ def test_external_env_is_blocked(tmp_path):
     )
     assert discovered["decision"] == DECISION_BLOCKED
     assert discovered["external_env"] is True
+    assert discovered["venv_status"] == "blocked"
+    assert discovered["blocked_cause"] == "external_env"

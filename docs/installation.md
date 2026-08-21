@@ -73,10 +73,14 @@ aef --json doctor
 ```
 
 `INSTALL_REQUIRED` means no compatible runtime is available. Review the pinned
-proposal, then consent with `aef doctor --install`. AEF never installs into
+proposal, then consent with `aef doctor --install`. Pass `--reuse-env` only when
+you explicitly allow probing a pre-existing `.aef-venv`. AEF never installs into
 the system interpreter and never rewrites an existing project virtual
-environment. A local wheel is installed offline only when its hash matches.
-There is no `aef update` command.
+environment. A local wheel is treated as offline-complete only when its hash
+matches (`verified`) and dependency wheels such as `jsonschema` are present
+beside it; otherwise `network_required` stays true. Pip installs pin
+`--index-url https://pypi.org/simple` with `--isolated --no-cache-dir`. There is
+no `aef update` command.
 
 AEF is source-available under the PolyForm Internal Use License 1.0.0. It is
 not open-source software. Read the repository `LICENSE` before use.

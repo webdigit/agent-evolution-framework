@@ -910,6 +910,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="consent to the proposed isolated Python installation",
     )
+    doctor_parser.add_argument(
+        "--reuse-env",
+        action="store_true",
+        help=(
+            "allow reusing a pre-existing .aef-venv interpreter during --install; "
+            "without this flag a fresh env is created under a free name"
+        ),
+    )
     ingest_parser = commands.add_parser(
         "ingest",
         help="ingest declared learning events from persisted records",
@@ -1786,31 +1794,62 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return _run_evaluate(args)
 
 
+def _doctor_status_from_decision(decision: str, *, after_install: bool, changed: bool) -> tuple[str, bool]:
+    if decision == "OK":
+        if after_install:
+            return ("CHANGE" if changed else "NO_CHANGE"), True
+        return "PASS", True
+    if decision == DECISION_INSTALL_REQUIRED:
+        return DECISION_INSTALL_REQUIRED, False
+    if decision == "BLOCKED":
+        return "BLOCKED", False
+    return "ERROR", False
+
+
 def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
     result = diagnose_runtime(workspace)
     decision = result["decision"]
     if args.install:
-        installed = install_isolated(workspace, consented=True)
+        reuse_env = bool(getattr(args, "reuse_env", False))
+        installed = install_isolated(
+            workspace, consented=True, reuse_env=reuse_env,
+        )
+        verification = None
+        diff = {"created": [], "modified": [], "removed": []}
         if installed["changed"]:
             python = Path(installed["python"])
-            verification = verify_installed(python, workspace)
+            expected = installed.get("install_pin") or result.get("expected_package_version")
+            verification = verify_installed(
+                python, workspace, expected_version=expected,
+            )
             if not verification["version_ok"]:
-                raise InstallRefused("installed runtime did not report a version")
-            status = "CHANGE"
-            ok = True
-            result = diagnose_runtime(workspace)
-            result["decision"] = "OK"
+                raise InstallRefused(
+                    "installed runtime version does not match the expected pin",
+                    reason="verify_mismatch",
+                    diagnosis=installed.get("diagnosis"),
+                    detail=verification.get("version_output"),
+                )
+            rel = Path(installed["env_path"]).name
+            diff = {"created": [rel], "modified": [], "removed": []}
+        result = diagnose_runtime(workspace)
+        if verification is not None:
             result["verification"] = {
                 "version_ok": verification["version_ok"],
                 "audit_ran": verification["audit_ran"],
+                "reported_version": verification.get("reported_version"),
             }
-            rel = Path(installed["env_path"]).name
-            diff = {"created": [rel], "modified": [], "removed": []}
-        else:
-            status = "NO_CHANGE"
-            ok = True
-            diff = {"created": [], "modified": [], "removed": []}
+        status, ok = _doctor_status_from_decision(
+            result["decision"],
+            after_install=True,
+            changed=bool(installed["changed"]),
+        )
+        meta = {
+            "install": installed.get("reason", "installed"),
+            "reuse_env": reuse_env,
+        }
+        if result.get("blocked_cause"):
+            meta["blocked_cause"] = result["blocked_cause"]
         envelope = _envelope(
             command="DOCTOR",
             workspace=workspace,
@@ -1818,22 +1857,16 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             ok=ok,
             dry_run=False,
             result=result,
-            meta={"install": installed.get("reason", "installed")},
+            meta=meta,
             diff=diff,
         )
         return envelope, _exit_code("DOCTOR", status)
-    if decision == "OK":
-        status = "PASS"
-        ok = True
-    elif decision == DECISION_INSTALL_REQUIRED:
-        status = DECISION_INSTALL_REQUIRED
-        ok = False
-    elif decision == "BLOCKED":
-        status = "BLOCKED"
-        ok = False
-    else:
-        status = "ERROR"
-        ok = False
+    status, ok = _doctor_status_from_decision(decision, after_install=False, changed=False)
+    meta: dict[str, Any] = {}
+    if result.get("blocked_cause"):
+        meta["blocked_cause"] = result["blocked_cause"]
+        if result.get("blocked_path"):
+            meta["blocked_path"] = result["blocked_path"]
     envelope = _envelope(
         command="DOCTOR",
         workspace=workspace,
@@ -1841,7 +1874,7 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         ok=ok,
         dry_run=False,
         result=result,
-        meta={},
+        meta=meta,
         diff=None,
     )
     return envelope, _exit_code("DOCTOR", status)
@@ -2023,14 +2056,22 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         )
         return envelope, 5
     elif isinstance(exc, InstallRefused):
+        diagnosis = getattr(exc, "diagnosis", None) or {}
+        meta = {
+            "reason": getattr(exc, "reason", None) or "install_refused",
+        }
+        if getattr(exc, "detail", None):
+            meta["detail"] = exc.detail
+        if diagnosis.get("blocked_cause"):
+            meta["blocked_cause"] = diagnosis["blocked_cause"]
         envelope = _envelope(
             command=str(getattr(args, "command", "doctor")).upper(),
             workspace=args.workspace,
             status="BLOCKED",
             ok=False,
             dry_run=False,
-            result={},
-            meta={"reason": "install_refused"},
+            result=dict(diagnosis) if isinstance(diagnosis, dict) else {},
+            meta=meta,
             diff=None,
         )
         return envelope, 4
