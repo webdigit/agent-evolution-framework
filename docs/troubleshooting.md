@@ -5,6 +5,19 @@
 Try `python -m aef --version`. On Windows, also try `py -3.11 -m aef`. Ensure
 the Python Scripts directory for the installation is on `PATH`.
 
+If neither entry point runs, treat the situation as `INSTALL_REQUIRED`. Do not
+edit `.agent/state/`. Run `aef doctor` or `aef --json doctor` when a compatible
+interpreter can import the package, review the pinned proposal, and consent
+with `aef doctor --install` only after that review. See
+[Runtime bootstrap](runtime.md).
+
+## `INSTALL_REQUIRED`
+
+`aef doctor` reports this status when no compatible AEF runtime is available.
+It is not an audit failure and not a blocked workspace mutation. An existing
+`.venv` from another platform is left untouched. A local wheel is used only
+when its hash matches.
+
 ## INIT is blocked
 
 Pass an explicit role:

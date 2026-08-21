@@ -29,6 +29,8 @@ def test_top_level_help_explains_project_scope_and_machine_output(capsys):
         (["integrate", "--help"], "confined to this project"),
         (["integrate", "claude", "--help"], "V1 supports project only"),
         (["record", "--help"], "declared-fact"),
+        (["upgrade", "--help"], "without writing"),
+        (["doctor", "--help"], "Does not modify"),
     ],
 )
 def test_command_help_describes_the_available_contract(arguments, expected, capsys):

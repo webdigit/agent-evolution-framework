@@ -53,6 +53,9 @@ from .claude_filesystem import (
 from .claude_integration import (
     plan_claude_integration, validate_claude_integration_workspace,
 )
+from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
+from .runtime_doctor import diagnose_runtime
+from .runtime_install import InstallRefused, install_isolated, verify_installed
 from .operations import (
     InvalidDiscoveryRegistryError,
     InvalidDiscoverySnapshotError,
@@ -197,7 +200,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         status = envelope["status"]
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
-            "RECORD", "UPGRADE",
+            "RECORD", "UPGRADE", "DOCTOR",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -209,6 +212,10 @@ def _valid_human_envelope(envelope: Any) -> bool:
             "INTEGRATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "RECORD": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "UPGRADE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "DOCTOR": {
+                "PASS", "CHANGE", "NO_CHANGE", "INSTALL_REQUIRED",
+                "BLOCKED", "FAILED", "ERROR",
+            },
         }
         if status not in allowed[command]:
             return False
@@ -531,6 +538,49 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Workspace : {workspace}\n"
                 )
 
+        if command == "DOCTOR":
+            decision = _escape_human_value(result.get("decision", status))
+            platform_name = _escape_human_value(result.get("platform", "unknown"))
+            found = _escape_human_value(result.get("found_package_version") or "none")
+            expected = _escape_human_value(result.get("expected_package_version") or "none")
+            venv_status = _escape_human_value(result.get("venv_status", "unknown"))
+            method = _escape_human_value(result.get("discovery_method", "none"))
+            if status == "PASS" or (status == "NO_CHANGE" and decision == "OK"):
+                return (
+                    "[OK] AEF runtime is ready\n\n"
+                    f"Platform  : {platform_name}\n"
+                    f"Method    : {method}\n"
+                    f"Found     : {found}\n"
+                    f"Venv      : {venv_status}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "CHANGE":
+                return (
+                    "[OK] AEF runtime was installed\n\n"
+                    f"Platform  : {platform_name}\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "INSTALL_REQUIRED":
+                command_line = _escape_human_value(result.get("install_command") or "")
+                return (
+                    "[INSTALL_REQUIRED] No compatible AEF runtime\n\n"
+                    f"Platform  : {platform_name}\n"
+                    f"Found     : {found}\n"
+                    f"Expected  : {expected}\n"
+                    f"Venv      : {venv_status}\n"
+                    f"Install   : {command_line}\n"
+                    "Consent   : re-run with --install after review\n"
+                    f"Workspace : {workspace}\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(
+                    envelope["meta"].get("reason") or "external environment path"
+                )
+                return (
+                    "[BLOCKED] AEF runtime diagnosis is blocked\n\n"
+                    f"Reason    : {reason}\n"
+                    f"Workspace : {workspace}\n"
+                )
         if command == "RECORD":
             record_id = _escape_human_value(result.get("record_id", "unknown"))
             if status == "CHANGE":
@@ -571,6 +621,8 @@ def _write_stderr(message: str) -> None:
 
 
 def _exit_code(command: str, status: str) -> int:
+    if status == DECISION_INSTALL_REQUIRED:
+        return INSTALL_REQUIRED_EXIT
     if status in {"CHANGE", "NO_CHANGE", "PASS"}:
         return 0
     if command == "AUDIT" and status == "FAIL":
@@ -686,6 +738,19 @@ def _build_parser() -> argparse.ArgumentParser:
     upgrade_parser.add_argument(
         "--dry-run", action="store_true",
         help="compute the projected result without writing",
+    )
+    doctor_parser = commands.add_parser(
+        "doctor",
+        help="diagnose the AEF Python runtime",
+        description=(
+            "Diagnose whether a compatible AEF runtime is executable. "
+            "Does not modify .agent/. Use --install only after explicit consent."
+        ),
+    )
+    doctor_parser.add_argument(
+        "--install",
+        action="store_true",
+        help="consent to the proposed isolated Python installation",
     )
     return parser
 
@@ -1265,8 +1330,70 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_record(args)
     if args.command == "upgrade":
         return _run_upgrade(args)
+    if args.command == "doctor":
+        return _run_doctor(args)
     return _run_evaluate(args)
 
+
+def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = Path(args.workspace).resolve()
+    result = diagnose_runtime(workspace)
+    decision = result["decision"]
+    if args.install:
+        installed = install_isolated(workspace, consented=True)
+        if installed["changed"]:
+            python = Path(installed["python"])
+            verification = verify_installed(python, workspace)
+            if not verification["version_ok"]:
+                raise InstallRefused("installed runtime did not report a version")
+            status = "CHANGE"
+            ok = True
+            result = diagnose_runtime(workspace)
+            result["decision"] = "OK"
+            result["verification"] = {
+                "version_ok": verification["version_ok"],
+                "audit_ran": verification["audit_ran"],
+            }
+            rel = Path(installed["env_path"]).name
+            diff = {"created": [rel], "modified": [], "removed": []}
+        else:
+            status = "NO_CHANGE"
+            ok = True
+            diff = {"created": [], "modified": [], "removed": []}
+        envelope = _envelope(
+            command="DOCTOR",
+            workspace=workspace,
+            status=status,
+            ok=ok,
+            dry_run=False,
+            result=result,
+            meta={"install": installed.get("reason", "installed")},
+            diff=diff,
+        )
+        return envelope, _exit_code("DOCTOR", status)
+    if decision == "OK":
+        status = "PASS"
+        ok = True
+    elif decision == DECISION_INSTALL_REQUIRED:
+        status = DECISION_INSTALL_REQUIRED
+        ok = False
+    elif decision == "BLOCKED":
+        status = "BLOCKED"
+        ok = False
+    else:
+        status = "ERROR"
+        ok = False
+    envelope = _envelope(
+        command="DOCTOR",
+        workspace=workspace,
+        status=status,
+        ok=ok,
+        dry_run=False,
+        result=result,
+        meta={},
+        diff=None,
+    )
+    return envelope, _exit_code("DOCTOR", status)
 
 def _run_upgrade(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
@@ -1391,6 +1518,18 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 5
+    elif isinstance(exc, InstallRefused):
+        envelope = _envelope(
+            command=str(getattr(args, "command", "doctor")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=False,
+            result={},
+            meta={"reason": "install_refused"},
+            diff=None,
+        )
+        return envelope, 4
     elif isinstance(exc, ClaudeIntegrationFilesystemError):
         code = "claude_integration_filesystem_error"
         message = "The Claude project integration could not be written safely."

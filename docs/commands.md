@@ -95,6 +95,25 @@ Begin refresh and recovery with `--dry-run`. Required recovery blocks every
 other modifying operation. See [Canonical input files](input-files.md) and
 [EVALUATE recovery](recovery.md).
 
+## DOCTOR
+
+```console
+aef doctor
+aef --json doctor
+aef doctor --install
+```
+
+Read-only runtime diagnosis. `doctor` does not write under `.agent/` and does
+not modify an existing virtual environment. Use `--json` before the command.
+
+A compatible runtime returns `PASS` (exit 0). A missing or incompatible
+runtime returns `INSTALL_REQUIRED` (exit 8) with a pinned Python install
+proposal. `--install` is explicit consent to that proposal; without it, AEF
+does not run `pip`. After a consented install, AEF runs `--version` and, when
+`.agent/manifest.json` already exists, `audit`. See [Runtime bootstrap](runtime.md).
+
+There is no `aef update` command. `upgrade` migrates workspace files only.
+
 ## Claude integration
 
 ```console
@@ -141,6 +160,7 @@ trigger an upgrade.
 | 4 | Operation blocked without mutation, including a RECORD conflict or an unreadable existing record |
 | 5 | Business `FAILED`, including a declared UPGRADE `MigrationFailure` |
 | 6 | Filesystem or permission failure |
+| 8 | DOCTOR `INSTALL_REQUIRED` — no compatible runtime; nothing was written |
 | 70 | Unexpected internal failure |
 
 Run `aef --help` and `aef COMMAND --help` for the authoritative installed

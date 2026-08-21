@@ -216,7 +216,8 @@ def test_missing_doctrine_is_blocked_code_4_without_claude_directory(tmp_path):
 
 def test_unicode_workspace_is_safe_under_ascii_console_encoding(tmp_path):
     root = initialized_workspace(tmp_path / "Claude intégration 日本")
-    environment = dict(**__import__("os").environ, PYTHONIOENCODING="ascii:strict")
+    environment = dict(__import__("os").environ)
+    environment["PYTHONIOENCODING"] = "ascii:strict"
     completed = subprocess.run(
         [str(launcher()), "--human", "--workspace", str(root), "integrate", "claude"],
         capture_output=True, check=False, env=environment,

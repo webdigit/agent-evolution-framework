@@ -2,7 +2,9 @@
 
 AEF V1 supports Python 3.11 through 3.14. Installing the command makes AEF
 available on your machine; running `aef init` activates it only in the selected
-project.
+project. Diagnose an existing checkout with `aef doctor` or
+`aef --json doctor` before creating a new environment. See
+[Runtime bootstrap](runtime.md).
 
 ## Install from Git
 
@@ -62,6 +64,19 @@ when you need to verify the wheel before installation.
 aef --help
 python -m aef --help
 ```
+
+## Diagnose the runtime after install
+
+```console
+aef doctor
+aef --json doctor
+```
+
+`INSTALL_REQUIRED` means no compatible runtime is available. Review the pinned
+proposal, then consent with `aef doctor --install`. AEF never installs into
+the system interpreter and never rewrites an existing project virtual
+environment. A local wheel is installed offline only when its hash matches.
+There is no `aef update` command.
 
 AEF is source-available under the PolyForm Internal Use License 1.0.0. It is
 not open-source software. Read the repository `LICENSE` before use.
