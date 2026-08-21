@@ -88,6 +88,7 @@ from .competency_declaration import (
 from .competency_declaration_ops import plan_declare, recover_declaration
 from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
 from .ingest_ops import plan_ingest
+from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
 
 
 API_VERSION = "aef.cli/v1"
@@ -1291,7 +1292,18 @@ def _load_snapshot(path: str | Path) -> Any:
     def reject_constant(value):
         raise json.JSONDecodeError(f"invalid JSON constant: {value}", raw, 0)
 
-    return json.loads(raw, parse_constant=reject_constant)
+    try:
+        return json.loads(
+            raw,
+            parse_constant=reject_constant,
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except DuplicateJSONKeyError as exc:
+        raise CLIInputError(
+            "duplicate_json_key",
+            f"Duplicate JSON key {exc.key!r} is not allowed.",
+            details={"key": exc.key},
+        ) from exc
 
 
 def _read_interactive_value(prompt: str) -> str | None:

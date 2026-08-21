@@ -152,6 +152,7 @@ Each event requires an `id` and either `novel` set to `true` or a `kind` of
 `help_request`, `human_correction`, `rule_mismatch`, or `success`.
 `rule_mismatch` requires `rule_id`. `success` requires `explained`.
 `pattern_key` and `competency` are optional. Unknown fields are rejected.
+Duplicate keys are rejected at every object depth.
 
 INGEST derives signals and observations only. It does not create XP, rules,
 or competencies, and it is not a runtime `doctor` install.

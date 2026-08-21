@@ -891,6 +891,36 @@ def test_transaction_rejects_non_strict_or_noncanonical_embedded_content(invalid
         validate_evaluation_transaction(journal)
 
 
+def test_duplicate_key_in_embedded_journal_content_keeps_pre_lot1_error_contract():
+    """Shared reject_duplicate_keys must not change EVALUATE journal diagnostics."""
+    from aef.evaluation_transaction import (
+        InvalidEvaluationTransactionError,
+        _parse_strict_content,
+        _sha256_bytes,
+        build_evaluation_transaction,
+        validate_evaluation_transaction,
+    )
+
+    duplicate = '{"phase":"prepared","phase":"committed"}\n'
+    with pytest.raises(
+        InvalidEvaluationTransactionError,
+        match=r"^invalid evaluation transaction JSON content$",
+    ) as raised:
+        _parse_strict_content(duplicate)
+    assert raised.value.__cause__ is not None
+
+    source, decisions = mixed_project_and_decisions()
+    _, desired, _ = evaluation_engine.evaluate_project(source, decisions)
+    journal = build_evaluation_transaction(source, desired, decisions)
+    journal["files"][0]["before_content"] = duplicate
+    journal["files"][0]["before_hash"] = _sha256_bytes(duplicate)
+    with pytest.raises(
+        InvalidEvaluationTransactionError,
+        match=r"^invalid evaluation transaction JSON content$",
+    ):
+        validate_evaluation_transaction(journal)
+
+
 def test_valid_nominal_transaction_contract_remains_accepted():
     from aef.evaluation_transaction import (
         build_evaluation_transaction, validate_evaluation_transaction,
