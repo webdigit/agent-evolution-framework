@@ -1,3 +1,26 @@
+# 2026-08-21 — epic-completion-yolo epic 5 + epic 6 (implémentation) — rétros + post-doc + brouillons recovery, git SKIP — epic-5-retro-2026-08-21.md / epic-6-retro-2026-08-21.md
+# 2026-08-21 — delivery pipeline YOLO epic 6 (dev 1d–1g) — stories 6.1–6.6 done, aef integrate agents/claude/gemini/all, pas de bump/tag/Release
+# 2026-08-21 — delivery pipeline YOLO epic 5 (dev 1d–1g) — stories 5.1–5.6 done, aef competency declare, pas de bump/tag/Release
+# 2026-08-21 — epic-completion-yolo epic 4 (implémentation) — rétro complète, post-doc, git SKIP — _bmad-output/implementation-artifacts/epic-4-retro-2026-08-21.md
+# 2026-08-21 — opp-5 GO humain + cadrage Epic 5 — stories 5.1–5.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-5-declaration-des-competences.md
+# 2026-08-21 — opp-6 GO humain + cadrage Epic 6 — stories 6.1–6.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-6-agent-guidance-integration.md
+# 2026-08-21 — opp-6 analyse de pertinence GO conditionnel — commun + sonnettes ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-6-agent-guidance-integration.md
+# 2026-08-21 — create-opportunity opp-6 (2e invocation, fusion) — sonnettes AGENTS.md + CLAUDE.md + GEMINI.md ; pas d’opp-7 — _bmad-output/planning-artifacts/opportunities/opp-6-agent-guidance-integration.md
+# 2026-08-21 — create-opportunity opp-6 — Agent Guidance Integration — _bmad-output/planning-artifacts/opportunities/opp-6-agent-guidance-integration.md — pas d’Epic avant GO
+# 2026-08-21 — opp-5 analyse de pertinence GO conditionnel — commande dédiée + RECORD cité + L1 ; pas d’EVALUATE create ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-5-declaration-des-competences.md
+# 2026-08-21 — opp-5 créée — Déclaration des compétences — _bmad-output/planning-artifacts/opportunities/opp-5-declaration-des-competences.md — pas d’Epic avant GO
+# 2026-08-21 — delivery pipeline YOLO epic 4 (dev 1d–1g) — stories 4.1–4.6 done, aef ingest, pas de bump/tag/Release
+# 2026-08-21 — delivery pipeline YOLO epic 4 (2e passe) — validate + risques 4.1–4.6, ready-for-dev, pas d’implémentation
+# 2026-08-21 — opp-4 GO humain + cadrage Epic 4 — stories 4.1–4.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-4-record-vers-apprentissage.md
+# 2026-08-21 — opp-4 analyse de pertinence GO conditionnel — commande dédiée + intake + ingest_events ; pas d’XP ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-4-record-vers-apprentissage.md
+# 2026-08-21 — create-opportunity opp-4 (2e invocation, idempotent) — même slug, pas d’opp-5
+# 2026-08-21 — opp-4 créée — RECORD vers apprentissage — _bmad-output/planning-artifacts/opportunities/opp-4-record-vers-apprentissage.md — pas d’Epic avant GO
+# 2026-08-20 — delivery pipeline YOLO epic 3 (dev 1d–1g) — stories 3.1–3.6 done, suite 1170 passed, pas de bump/tag/Release
+# 2026-08-20 — delivery pipeline YOLO epic 3 (2e passe) — validate + risques 3.1–3.6, ready-for-dev, pas d’implémentation
+# 2026-08-20 — opp-3 GO humain + cadrage Epic 3 — stories 3.1–3.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-3-runtime-bootstrap-doctor.md
+# 2026-08-20 — opp-3 analyse de pertinence GO conditionnel — procédure Python unique + doctor + INSTALL_REQUIRED ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-3-runtime-bootstrap-doctor.md
+# 2026-08-20 — opp-3 créée — Runtime Bootstrap & Doctor — _bmad-output/planning-artifacts/opportunities/opp-3-runtime-bootstrap-doctor.md — pas d’Epic avant GO
+# 2026-08-20 — GO publish AEF 1.2.0 — Release 374040172 publiée, tag v1.2.0, commit 5147e606 — _bmad-output/implementation-artifacts/release-1.2.0-published-2026-08-20.md
 # sprint-status.yaml — AEF local
 # 2026-08-20 — U5 + DEV final — wheel isolé, 1090 passed, pas de push — _bmad-output/implementation-artifacts/dev-final-upgrade-v1-x-2026-08-20.md
 # 2026-08-20 — epic-completion-yolo epic 2 (implémentation) — rétro complète, post-doc, git SKIP — _bmad-output/implementation-artifacts/epic-2-retro-2026-08-20.md
@@ -6,7 +29,7 @@
 # 2026-08-20 — document completion YOLO epic 2 (rétro partielle cadrage) — _bmad-output/implementation-artifacts/epic-2-retro-2026-08-20.md — pas de docs/ suivis, pas de git
 # 2026-08-20 — delivery pipeline YOLO epic 2 — stories 2.1–2.6 ready-for-dev, pas d’implémentation — _bmad-output/planning-artifacts/epic-2-upgrade-v1-x-substrat-migration-workspace.md
 # 2026-08-20 — opp-2 GO humain + cadrage UPGRADE V1.x verrouillé
-# 2026-08-20 — opp-2 analyse de pertinence GO conditionnel — CLI aef upgrade + journal distinct + cible 1.0.0 ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-2-upgrade-v1-x-substrat-migration-workspace.md
+# 2026-08-20 — opp-2 analyse de pertinence GO conditionnel — CLI + journal distinct + cible 1.0.0 ; pas d’Epic — _bmad-output/planning-artifacts/opportunities/bmad-meeting-opp-2-upgrade-v1-x-substrat-migration-workspace.md
 # 2026-08-20 — opp-2 créée — UPGRADE V1.x substrat migration workspace — _bmad-output/planning-artifacts/opportunities/opp-2-upgrade-v1-x-substrat-migration-workspace.md — pas d’Epic avant GO
 # 2026-08-20 — réconciliation tracker ↔ code : RECORD V1 déjà livré (1.1.0) ; AC 1.1–1.5 tenus ; 71 tests RECORD verts
 # 2026-08-20 — delivery pipeline YOLO epic 1 — validate-create-story 1.1–1.5, skip create, pas d’implémentation
@@ -17,6 +40,41 @@
 # 2026-08-20 — opp-1 créée — RECORD V1 alimenter mémoire d’évolution — _bmad-output/planning-artifacts/opportunities/opp-1-record-v1-alimenter-memoire-evolution.md — pas d’Epic avant GO
 
 development_status:
+
+  epic-6-agent-guidance-integration: done
+  epic-6-retrospective: done
+  epic-6-1-audit-brownfield-plan-fichiers: done
+  epic-6-2-contrats-commun-sonnettes: done
+  epic-6-3-cli-status-dry-run: done
+  epic-6-4-appliquer-commun-sonnettes: done
+  epic-6-5-brownfield-upgrade-sante: done
+  epic-6-6-cloisonnement-documentation: done
+
+  epic-5-declaration-des-competences: done
+  epic-5-retrospective: done
+  epic-5-1-audit-brownfield-plan-fichiers: done
+  epic-5-2-contrats-declaration-l1: done
+  epic-5-3-cli-dediee-dry-run: done
+  epic-5-4-appliquer-naissance-ledger: done
+  epic-5-5-audit-provenance-brownfield: done
+  epic-5-6-cloisonnement-documentation: done
+
+  epic-4-record-vers-apprentissage: done
+  epic-4-retrospective: done
+  epic-4-1-audit-brownfield-plan-fichiers: done
+  epic-4-2-contrats-intake-provenance: done
+  epic-4-3-cli-dediee-dry-run: done
+  epic-4-4-appliquer-ingest-knowledge: done
+  epic-4-5-audit-provenance-replay: done
+  epic-4-6-cloisonnement-documentation: done
+
+  epic-3-runtime-bootstrap-doctor: done
+  epic-3-1-audit-brownfield-plan-fichiers: done
+  epic-3-2-contrats-runtime-doctor: done
+  epic-3-3-cli-aef-doctor: done
+  epic-3-4-install-consentie-isolee: done
+  epic-3-5-instruction-agent-python: done
+  epic-3-6-cloisonnement-documentation: done
 
   epic-2-upgrade-v1-x-substrat-migration-workspace: done
   epic-2-retrospective: done
