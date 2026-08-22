@@ -72,6 +72,13 @@ record file. Replaying the same valid document returns `NO_CHANGE`. Reusing
 the same `record_id` with different content is blocked without rewriting the
 existing file.
 
+To derive signals from that journal, cite the persisted record in a separate
+intake and run `aef ingest --intake FILE`. RECORD itself does not learn.
+
+To officially birth a competency at L1, cite the same record from a declaration
+document and run `aef competency declare --declaration FILE`. That command is
+not a promotion and does not edit competencies by hand.
+
 ## 4. Use AEF with an agent
 
 A natural-language request can be simple:
@@ -82,15 +89,16 @@ A natural-language request can be simple:
 AEF data remains ordinary JSON and Markdown under `.agent/`, so it can be
 inspected and backed up with the project.
 
-## 5. Optional Claude Code guidance
+## 5. Optional agent guidance doors
 
 ```console
-aef integrate claude
+aef integrate all
 aef integrate claude --status
 ```
 
-This adds a managed segment to `.claude/CLAUDE.md` in the project. It is
-guidance-only, project-scoped, and installs no hooks.
+This installs the shared `AGENTS.md` commun plus root doorbells (`CLAUDE.md`,
+`GEMINI.md`). It is guidance-only, project-scoped, and installs no hooks. An
+existing brownfield `.claude/CLAUDE.md` bridge is left alone.
 
 ## 6. Machine-readable output
 
@@ -105,5 +113,5 @@ aef --compact evaluate --list
 Use `--dry-run` before a supported modification when you want to inspect the
 planned bytes without writing them.
 
-See [Canonical input files](input-files.md) for executable RECORD, DISCOVER,
-CONSOLIDATE, and EVALUATE documents.
+See [Canonical input files](input-files.md) for executable RECORD, INGEST,
+DISCOVER, CONSOLIDATE, and EVALUATE documents.

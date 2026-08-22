@@ -12,12 +12,14 @@ SCHEMAS = {
     "capability.schema.json",
     "career.schema.json",
     "competencies.schema.json",
+    "competency-declaration-submission.schema.json",
     "evaluation.schema.json",
     "exploration.schema.json",
     "knowledge.schema.json",
     "manifest.schema.json",
     "migrations.schema.json",
     "policies.schema.json",
+    "ingest-submission.schema.json",
     "record-submission.schema.json",
     "record.schema.json",
     "supervision.schema.json",
@@ -26,6 +28,8 @@ SCHEMAS = {
 DOCUMENTATION_EXAMPLES = {
     "connectors.json", "reviews.json", "evaluation-decisions.json",
     "recording.json",
+    "ingest.json",
+    "competency-declaration.json",
 }
 FORBIDDEN_PARTS = {
     ".agent", ".venv", "__pycache__", ".pytest_cache", "build", "dist",

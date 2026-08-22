@@ -51,7 +51,7 @@ from .upgrade_transaction import (
 )
 
 
-BOOTSTRAP_NAMES = ("AGENTS.md", "CLAUDE.md")
+BOOTSTRAP_NAMES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
 
 
 class UpgradeBlocked(Exception):

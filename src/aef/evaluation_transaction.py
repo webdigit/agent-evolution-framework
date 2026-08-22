@@ -12,7 +12,7 @@ from .filesystem import (
     load_workspace,
     plan_workspace,
 )
-from .strict_json import InvalidStrictJSONError, validate_strict_json
+from .strict_json import InvalidStrictJSONError, reject_duplicate_keys, validate_strict_json
 
 
 TRANSACTION_PATH = EVALUATION_TRANSACTION_PATH
@@ -67,14 +67,6 @@ def decision_batch_digest(document):
 def _parse_strict_content(content):
     def reject_constant(value):
         raise ValueError(f"invalid JSON constant: {value}")
-
-    def reject_duplicate_keys(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError("duplicate JSON key")
-            out[key] = value
-        return out
 
     try:
         parsed = json.loads(

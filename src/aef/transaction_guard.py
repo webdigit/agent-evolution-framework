@@ -1,3 +1,7 @@
+from .competency_declaration_transaction import (
+    TRANSACTION_PATH as COMPETENCY_DECLARATION_TRANSACTION_PATH,
+    declaration_transaction_present,
+)
 from .evaluation_transaction import TRANSACTION_PATH
 from .upgrade_compat import UPGRADE_TRANSACTION_PATH
 from .upgrade_transaction import upgrade_transaction_present
@@ -14,6 +18,11 @@ def upgrade_recovery_required(project):
     return upgrade_transaction_present(project)
 
 
+def competency_declaration_recovery_required(project):
+    """Return true when declaration recovery must run before other mutations."""
+    return declaration_transaction_present(project)
+
+
 def mutation_guard_metadata(project):
     if evaluation_recovery_required(project):
         return {
@@ -24,5 +33,10 @@ def mutation_guard_metadata(project):
         return {
             "reason": "upgrade_recovery_required",
             "transaction_path": UPGRADE_TRANSACTION_PATH,
+        }
+    if competency_declaration_recovery_required(project):
+        return {
+            "reason": "competency_declaration_recovery_required",
+            "transaction_path": COMPETENCY_DECLARATION_TRANSACTION_PATH,
         }
     return None
