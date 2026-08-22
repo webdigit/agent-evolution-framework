@@ -574,35 +574,71 @@ def _render_human(envelope: dict[str, Any]) -> str:
             venv_status = _escape_human_value(result.get("venv_status", "unknown"))
             method = _escape_human_value(result.get("discovery_method", "none"))
             if status == "PASS" or (status == "NO_CHANGE" and decision == "OK"):
-                return (
-                    "[OK] AEF runtime is ready\n\n"
-                    f"Platform  : {platform_name}\n"
-                    f"Method    : {method}\n"
-                    f"Found     : {found}\n"
-                    f"Venv      : {venv_status}\n"
-                    f"Workspace : {workspace}\n"
-                )
+                observations = result.get("observations") or []
+                local_artifact = result.get("local_artifact")
+                lines = [
+                    "[OK] AEF runtime is ready\n",
+                    "",
+                    f"Platform  : {platform_name}",
+                    f"Method    : {method}",
+                    f"Found     : {found}",
+                    f"Venv      : {venv_status}",
+                ]
+                if local_artifact and local_artifact not in {"absent", ""}:
+                    lines.append(f"Artifact  : {_escape_human_value(local_artifact)}")
+                if observations:
+                    lines.append(
+                        f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
+                    )
+                lines.append(f"Workspace : {workspace}")
+                return "\n".join(lines) + "\n"
             if status == "INSTALL_REQUIRED":
                 command_line = _escape_human_value(result.get("install_command") or "")
-                return (
-                    "[INSTALL_REQUIRED] No compatible AEF runtime\n\n"
-                    f"Platform  : {platform_name}\n"
-                    f"Found     : {found}\n"
-                    f"Expected  : {expected}\n"
-                    f"Venv      : {venv_status}\n"
-                    f"Install   : {command_line}\n"
-                    "Action    : run the Install command manually after review\n"
-                    f"Workspace : {workspace}\n"
-                )
+                local_artifact = _escape_human_value(result.get("local_artifact") or "none")
+                network = "yes" if result.get("network_required") else "no"
+                offline_basis = result.get("offline_basis")
+                observations = result.get("observations") or []
+                lines = [
+                    "[INSTALL_REQUIRED] No compatible AEF runtime\n",
+                    "",
+                    f"Platform  : {platform_name}",
+                    f"Found     : {found}",
+                    f"Expected  : {expected}",
+                    f"Venv      : {venv_status}",
+                    f"Artifact  : {local_artifact}",
+                    f"Network   : {network}",
+                ]
+                if offline_basis:
+                    lines.append(
+                        f"Offline   : {_escape_human_value(offline_basis)} "
+                        "(self-attested checksum from the workspace)"
+                    )
+                if observations:
+                    lines.append(
+                        f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
+                    )
+                lines.extend([
+                    f"Install   : {command_line}",
+                    "Action    : run the Install command manually after review",
+                    f"Workspace : {workspace}",
+                ])
+                return "\n".join(lines) + "\n"
             if status == "BLOCKED":
-                reason = _escape_human_value(
-                    envelope["meta"].get("reason") or "external environment path"
+                cause = _escape_human_value(
+                    envelope["meta"].get("blocked_cause")
+                    or result.get("blocked_cause")
+                    or "unknown"
                 )
-                return (
-                    "[BLOCKED] AEF runtime diagnosis is blocked\n\n"
-                    f"Reason    : {reason}\n"
-                    f"Workspace : {workspace}\n"
-                )
+                blocked_path = envelope["meta"].get("blocked_path") or result.get("blocked_path")
+                lines = [
+                    "[BLOCKED] AEF runtime diagnosis is blocked\n",
+                    "",
+                    f"Cause     : {cause}",
+                ]
+                if blocked_path:
+                    lines.append(f"Path      : {_escape_human_value(blocked_path)}")
+                lines.append(f"Workspace : {workspace}")
+                return "\n".join(lines) + "\n"
 
         if command == "RECORD":
             record_id = _escape_human_value(result.get("record_id", "unknown"))
@@ -1781,9 +1817,7 @@ def _doctor_status_from_decision(decision: str) -> tuple[str, bool]:
         return "PASS", True
     if decision == DECISION_INSTALL_REQUIRED:
         return DECISION_INSTALL_REQUIRED, False
-    if decision == "BLOCKED":
-        return "BLOCKED", False
-    return "ERROR", False
+    return "BLOCKED", False
 
 
 def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:

@@ -82,10 +82,11 @@ AEF never installs into the system interpreter and never rewrites an existing
 project virtual environment. A local wheel with a matching co-located digest is
 `checksum_matched` (self-attested consistency only). Offline-complete proposals
 (`network_required: false`) require `offline_basis: self_attested_checksum` —
-checksum matched **and** dependency wheels such as `jsonschema` beside the AEF
-wheel. Unverified local wheels are not proposed with `--no-index`. Pip proposals
-pin `--index-url https://pypi.org/simple` with `--isolated --no-cache-dir`. There
-is no `aef update` command.
+checksum matched **and** a non-empty `jsonschema-*.whl` beside the AEF wheel.
+Offline mode does not verify transitive dependencies; treat it as a hint, not a
+complete air-gap guarantee. Unverified local wheels are not proposed with
+`--no-index`. Pip proposals pin `--index-url https://pypi.org/simple` with
+`--isolated --no-cache-dir`. There is no `aef update` command.
 
 AEF is source-available under the PolyForm Internal Use License 1.0.0. It is
 not open-source software. Read the repository `LICENSE` before use.

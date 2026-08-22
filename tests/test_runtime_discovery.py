@@ -16,7 +16,7 @@ from aef.runtime_discovery import (
     interpreter_label,
     read_expected_package_version,
 )
-from aef.runtime_doctor import DOCTOR_RESULT_FIELDS, diagnose_runtime, proposed_install_command
+from aef.runtime_doctor import DOCTOR_RESULT_FIELDS, diagnose_runtime, proposed_install_command_from_spec, resolve_package_install_spec
 
 
 def write_venv(root: Path, *, kind: str) -> Path:
@@ -104,12 +104,11 @@ def test_empty_venv_is_not_a_declared_runtime(tmp_path, monkeypatch):
     assert discovered["venv_status"] == "compatible"
 
 
-def test_discovery_order_module_then_declared(tmp_path):
+def test_discovery_order_declared_env_wins_over_imported(tmp_path):
     write_venv(tmp_path / ".aef-venv", kind="windows" if __import__("os").name == "nt" else "posix")
     pkg = tmp_path / ".aef-venv" / ("Lib" if __import__("os").name == "nt" else "lib/python3.11")
     pkg = pkg / "site-packages" / "aef"
     pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
     (tmp_path / "aef").write_bytes(b"")
     (tmp_path / "aef.exe").write_bytes(b"")
@@ -119,8 +118,9 @@ def test_discovery_order_module_then_declared(tmp_path):
     assert declared["found_package_version"] == "1.2.0"
     assert declared["decision"] == DECISION_OK
 
-    module_hit = discover_runtime(tmp_path, can_import=lambda: True)
-    assert module_hit["discovery_method"] == "python_module"
+    with_import = discover_runtime(tmp_path, can_import=lambda: True)
+    assert with_import["discovery_method"] == "declared_env"
+    assert with_import["found_package_version"] == "1.2.0"
 
 
 def test_pin_mismatch_requires_install(tmp_path):
@@ -146,7 +146,6 @@ def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
     )
     assert tuple(result) == DOCTOR_RESULT_FIELDS
     assert result["decision"] == DECISION_INSTALL_REQUIRED
-    assert result["human_action_required"] is True
     assert result["network_required"] is True
     assert result["local_artifact"] == "absent"
     assert result["blocked_cause"] is None
@@ -189,11 +188,12 @@ def test_unverified_wheel_is_not_presented_as_available(tmp_path):
 
 
 def test_proposed_command_quotes_spaces():
-    command = proposed_install_command(
+    spec = resolve_package_install_spec(
+        expected_package_version="1.2.0",
+        artifact="checksum_matched",
         wheel=Path("agent_evolution_framework-1.2.0 my wheel.whl"),
-        version="1.2.0",
-        isolated_dir=".aef-venv",
     )
+    command = proposed_install_command_from_spec(spec, ".aef-venv")
     assert "python" in command.lower() or "py -3.11" in command
     assert "venv" in command
     assert "agent_evolution_framework-1.2.0 my wheel.whl" in command or "my" in command

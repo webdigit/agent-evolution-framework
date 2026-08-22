@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from aef import cli
-from aef.runtime_discovery import DECISION_BLOCKED, discover_runtime, read_expected_package_version
+from aef.runtime_discovery import DECISION_BLOCKED, discover_runtime, is_pep440_version_token, read_expected_package_version
 from aef.runtime_doctor import classify_local_artifact, diagnose_runtime, resolve_package_install_spec
 from tests.test_runtime_discovery import no_path
 
@@ -31,14 +31,11 @@ def write_expected(workspace: Path, version: str) -> None:
 
 
 def test_m1_path_method_no_longer_probes_or_passes(tmp_path):
-    from aef.runtime_discovery import parse_aef_version_output
-
     discovered = discover_runtime(tmp_path, can_import=lambda: False)
     assert discovered["discovery_method"] != "path"
-    assert parse_aef_version_output("garbage") is None
-    assert parse_aef_version_output("9.9.9") is None
-    assert parse_aef_version_output("AEF 9.9.9") is None
-    assert parse_aef_version_output("aef 1.2.0") == "1.2.0"
+    assert is_pep440_version_token("garbage") is False
+    assert is_pep440_version_token("9.9.9") is True
+    assert is_pep440_version_token("1.2.0") is True
 
     module_hit = discover_runtime(tmp_path, can_import=lambda: True)
     assert module_hit["discovery_method"] == "python_module"

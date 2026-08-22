@@ -94,7 +94,6 @@ def test_install_required_parity_without_pip(tmp_path, capsys, monkeypatch):
         "venv_status": "incompatible",
         "network_required": True,
         "local_artifact": "absent",
-        "human_action_required": True,
         "install_command": "python3 -m venv .aef-venv && .aef-venv/bin/python -m pip install \"agent-evolution-framework==1.2.0\"",
         "decision": DECISION_INSTALL_REQUIRED,
     }

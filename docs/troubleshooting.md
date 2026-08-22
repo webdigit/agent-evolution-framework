@@ -17,6 +17,22 @@ It is not an audit failure and not a blocked workspace mutation. An existing
 `.venv` from another platform is left untouched. A local wheel is used only
 when its hash matches.
 
+## `doctor` returns `BLOCKED`
+
+`aef doctor` reports `BLOCKED` (exit 4) when diagnosis cannot proceed safely.
+Read `blocked_cause` and `blocked_path` in the JSON envelope, or the `Cause` /
+`Path` lines in human output. Common causes:
+
+- `invalid_expected_package_version` — `.agent/runtime-requirements.json` is
+  missing, malformed, or carries a non-PEP-440 version.
+- `external_env` — a declared virtual environment symlink escapes the
+  workspace.
+- `ambiguous_local_wheels` — multiple local wheels match and none can be chosen
+  while installation is still required.
+
+Fix the reported path or requirement, then rerun `aef doctor`. `BLOCKED` is not
+`INSTALL_REQUIRED` and proposes no install command.
+
 ## INIT is blocked
 
 Pass an explicit role:

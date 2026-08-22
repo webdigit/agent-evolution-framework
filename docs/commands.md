@@ -205,8 +205,8 @@ aef --json doctor
 
 Read-only runtime diagnosis. `doctor` does not write under `.agent/`, does not
 modify an existing virtual environment, and does not run `pip` or create
-environments. Without flags it does not execute third-party binaries from
-`PATH`. Use `--json` before the command.
+environments. It never executes third-party binaries from `PATH`. Use `--json`
+before the command.
 
 A compatible runtime returns `PASS` (exit 0). A missing or incompatible runtime
 returns `INSTALL_REQUIRED` (exit 8) with a pinned, workspace-absolute Python

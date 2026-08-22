@@ -16,7 +16,6 @@ from .upgrade_compat import MAX_FILE_BYTES
 DECISION_OK = "OK"
 DECISION_INSTALL_REQUIRED = "INSTALL_REQUIRED"
 DECISION_BLOCKED = "BLOCKED"
-DECISION_ERROR = "ERROR"
 INSTALL_REQUIRED_EXIT = 8
 
 RUNTIME_REQUIREMENTS_PATH = ".agent/runtime-requirements.json"
@@ -47,8 +46,7 @@ def host_architecture() -> str:
     return (platform.machine() or "unknown").lower() or "unknown"
 
 
-def interpreter_label(executable: str | None = None) -> str:
-    _ = executable
+def interpreter_label() -> str:
     return f"{platform.python_implementation()}-{platform.python_version()}"
 
 
@@ -56,7 +54,24 @@ def is_pep440_version_token(value: str) -> bool:
     """Accept PEP 440 public versions; reject shell metacharacters."""
     if not value or SHELL_UNSAFE_VERSION.search(value):
         return False
-    return bool(PEP440_VERSION.fullmatch(value))
+    if not value.isascii():
+        return False
+    if not PEP440_VERSION.fullmatch(value):
+        return False
+    core = value.split("+", 1)[0].split("!", 1)[-1]
+    for marker in ("alpha", "beta", "preview", "post", "dev", "rc"):
+        idx = core.lower().find(marker)
+        if idx > 0:
+            core = core[:idx]
+    for marker in ("a", "b", "c"):
+        if marker in core.lower() and not core.lower().startswith(marker):
+            idx = core.lower().rfind(marker)
+            if idx > 0 and core[idx - 1].isdigit():
+                core = core[:idx]
+    for part in core.split("."):
+        if part and not any(ch.isdigit() for ch in part):
+            return False
+    return True
 
 
 def parse_pyvenv_cfg(text: str) -> dict[str, str]:
@@ -122,24 +137,6 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
     return __version__
 
 
-def parse_aef_version_output(text: str) -> str | None:
-    """Strictly parse `aef --version` / package version output.
-
-    Requires the exact lowercase prefix ``aef`` then a PEP 440 token.
-    Bare versions and wrong-case prefixes are rejected.
-    """
-    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    if len(lines) != 1:
-        return None
-    parts = lines[0].split()
-    if len(parts) != 2 or parts[0] != "aef":
-        return None
-    candidate = parts[1]
-    if is_pep440_version_token(candidate):
-        return candidate
-    return None
-
-
 def _read_bounded_utf8(path: Path, workspace: Path) -> str | None:
     """Read up to MAX_FILE_BYTES; refuse links that escape the workspace."""
     try:
@@ -194,7 +191,11 @@ def _aef_package_roots(venv: Path) -> list[Path]:
 
 
 def venv_has_aef_package(venv: Path) -> bool:
-    return any((root / "__init__.py").is_file() for root in _aef_package_roots(venv))
+    """Detect an installed AEF tree, including namespace packages without __init__.py."""
+    for root in _aef_package_roots(venv):
+        if (root / "_version.py").is_file():
+            return True
+    return False
 
 
 def read_aef_version_from_tree(venv: Path, workspace: Path) -> str | None:
@@ -322,31 +323,35 @@ def discover_runtime(
     *,
     can_import: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Deterministic discovery. Never executes a PATH or foreign-venv binary."""
+    """Deterministic discovery. Never executes a PATH or foreign-venv binary.
+
+    When a declared project environment carries a readable AEF version, it wins
+    over the running interpreter (``python_module``). The CLI process always
+    imports ``aef``; ``declared_env`` answers which runtime the workspace uses.
+    """
     imported = (can_import or module_importable)()
     venv_status = summarize_venv_status(workspace)
-    if imported:
+    declared_version = None
+    declared_ready = False
+    if venv_status == "compatible":
+        for candidate in find_declared_envs(workspace):
+            if inspect_venv_tree(candidate) != "compatible":
+                continue
+            if not venv_has_aef_package(candidate):
+                continue
+            declared_version = read_aef_version_from_tree(candidate, workspace)
+            if declared_version is not None:
+                declared_ready = True
+                break
+    if declared_ready:
+        method = "declared_env"
+        version = declared_version
+    elif imported:
         method = "python_module"
         version = found_package_version(imported=True)
     else:
-        declared_version = None
-        declared_ready = False
-        if venv_status == "compatible":
-            for candidate in find_declared_envs(workspace):
-                if inspect_venv_tree(candidate) != "compatible":
-                    continue
-                if not venv_has_aef_package(candidate):
-                    continue
-                declared_version = read_aef_version_from_tree(candidate, workspace)
-                if declared_version is not None:
-                    declared_ready = True
-                    break
-        if declared_ready:
-            method = "declared_env"
-            version = declared_version
-        else:
-            method = "none"
-            version = None
+        method = "none"
+        version = None
     expected_info = read_expected_package_version(workspace)
     if expected_info["status"] == "invalid":
         return {

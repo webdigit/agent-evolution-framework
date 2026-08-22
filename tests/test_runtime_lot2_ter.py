@@ -33,7 +33,7 @@ def test_pep440_versions_accepted(version):
 
 @pytest.mark.parametrize(
     "version",
-    ['1.0.0" & echo PWNED & "', "1.0.0;rm", "1 2 3"],
+    ['1.0.0" & echo PWNED & "', "1.0.0;rm", "1 2 3", "1.2.0rc١", "1.2.0.zzz"],
 )
 def test_shell_unsafe_versions_rejected(version):
     assert not is_pep440_version_token(version)
@@ -105,9 +105,15 @@ def test_ambiguous_wheels_observed_not_blocked_when_runtime_ok(tmp_path, monkeyp
     assert result["blocked_cause"] is None
 
 
-def test_self_attested_checksum_disclosed_for_offline(tmp_path):
+def test_self_attested_checksum_disclosed_for_offline(tmp_path, capsys):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "9.9.9"}),
+        encoding="utf-8",
+    )
     payload = b"wheel-bytes"
-    wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    wheel = tmp_path / "agent_evolution_framework-9.9.9-py3-none-any.whl"
     wheel.write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
     (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
@@ -117,6 +123,104 @@ def test_self_attested_checksum_disclosed_for_offline(tmp_path):
     assert result["network_required"] is False
     assert result["offline_basis"] == "self_attested_checksum"
     assert "--no-index" in result["install_command"]
+
+    code, _, captured = invoke(
+        capsys, "--human", "--workspace", str(tmp_path), "doctor",
+    )
+    assert code == 8
+    assert "checksum_matched" in captured.out
+    assert "self_attested_checksum" in captured.out
+    assert "Network   : no" in captured.out
+
+
+def test_jsonschema_specifications_wheel_does_not_enable_offline(tmp_path):
+    payload = b"wheel-bytes"
+    wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    wheel.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    (tmp_path / "jsonschema-specifications-2024.10.1-py3-none-any.whl").write_bytes(b"x")
+    result = diagnose_runtime(tmp_path, can_import=lambda: False)
+    assert result["network_required"] is True
+    assert result["offline_basis"] is None
+
+
+def test_install_command_targets_free_env_when_primary_occupied(tmp_path, capsys):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    write_venv(workspace / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
+    agent = workspace / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    code, envelope, _ = invoke(
+        capsys, "--json", "--workspace", str(workspace), "doctor",
+    )
+    assert code == 8
+    proposed = envelope["result"]["install_command"]
+    platform_env = (workspace / f".aef-venv-{'windows' if os.name == 'nt' else 'linux'}").resolve()
+    primary_env = (workspace / ".aef-venv").resolve()
+    quoted = proposed.split("&&", 1)[0]
+    target_token = quoted.replace('"', "").split()[-1]
+    target_path = Path(target_token).resolve()
+    assert target_path == platform_env
+    assert target_path != primary_env
+
+
+def test_namespace_package_declared_env_is_discovered(tmp_path):
+    env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
+    pkg = env / ("Lib" if os.name == "nt" else "lib/python3.11") / "site-packages" / "aef"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
+    result = diagnose_runtime(tmp_path, can_import=lambda: False)
+    assert result["discovery_method"] == "declared_env"
+    assert result["found_package_version"] == "1.2.0"
+    assert result["decision"] == "OK"
+
+
+def test_blocked_human_shows_cause_and_path(tmp_path, capsys):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text("{not-json", encoding="utf-8")
+    code, _, captured = invoke(capsys, "--human", "--workspace", str(tmp_path), "doctor")
+    assert code == 4
+    assert "invalid_expected_package_version" in captured.out
+    assert "runtime-requirements.json" in captured.out
+    assert "external environment path" not in captured.out
+
+
+def _lying_declared_env(workspace: Path) -> Path:
+    """Minimal venv tree: only _version.py, no real package install."""
+    kind = "windows" if os.name == "nt" else "posix"
+    env = write_venv(workspace / ".aef-venv", kind=kind)
+    pkg = env / ("Lib" if os.name == "nt" else "lib/python3.11") / "site-packages" / "aef"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "_version.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
+    return env
+
+
+def test_lying_declared_env_reports_tree_version_with_reserve(tmp_path, capsys, monkeypatch):
+    """Hand-crafted _version.py without a real install: PASS + visible reserve.
+
+    Doctor does not execute the declared venv and does not attest pip success.
+    It reports what the workspace tree declares and flags the tree-read source.
+    """
+    _lying_declared_env(tmp_path)
+    monkeypatch.setattr("aef._version.__version__", "1.2.0")
+    result = diagnose_runtime(tmp_path)
+    assert result["discovery_method"] == "declared_env"
+    assert result["found_package_version"] == "9.9.9"
+    assert result["decision"] == "OK"
+    assert "declared_env_version_from_tree" in result["observations"]
+
+    code, _, captured = invoke(
+        capsys, "--human", "--workspace", str(tmp_path), "doctor",
+    )
+    assert code == 0
+    assert "declared_env_version_from_tree" in captured.out
+    assert "[OK]" in captured.out
 
 
 def test_unverified_wheel_never_sets_offline_basis(tmp_path):

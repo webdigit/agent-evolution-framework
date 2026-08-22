@@ -15,9 +15,20 @@ aef --json doctor
 
 `doctor` is **read-only**. It inspects the runtime. It does not write under
 `.agent/`, does not modify an existing virtual environment, does not run `pip`,
-and does not create environments. AEF does not execute third-party binaries
-found on `PATH` (including a binary named `aef`); discovery uses the running
-Python module or a tree read of a declared project environment.
+and does not create environments. AEF never executes third-party binaries found
+on `PATH` (including a binary named `aef`). Discovery prefers a declared
+project environment (`.aef-venv`, `.venv`, or `venv`) when it carries a
+readable `aef/_version.py`; otherwise it falls back to the running Python
+module.
+
+**What `found_package_version` means.** For `discovery_method: declared_env`,
+the version is read from the project venv tree (`site-packages/aef/_version.py`)
+without executing that interpreter. A hand-crafted `_version.py` in an
+otherwise empty `.aef-venv` is reported as declared — `doctor` does not verify
+that `pip install` succeeded or that `import aef` would work inside that venv.
+The envelope records `observations: ["declared_env_version_from_tree"]` in that
+case. For `discovery_method: python_module`, the version is the package imported
+by the current CLI process.
 
 Automated installation from `doctor` is planned for a later release.
 Until then, when installation is required, `doctor` returns a **copyable command**
@@ -41,9 +52,9 @@ aef --json doctor
 ## Isolated install (manual)
 
 The default target is a project-local environment named `.aef-venv`. When that
-name already holds an environment from another platform, the proposal uses
-`.aef-venv-<platform>` instead. An existing `.venv` or `.aef-venv` is never
-rewritten.
+name is already occupied, the proposed `install_command` targets the first free
+name in order: `.aef-venv`, then `.aef-venv-<platform>`. An existing `.venv`
+or `.aef-venv` is never rewritten by the proposal.
 
 A local wheel whose digest matches a co-located sidecar
 (`.whl.sha256` or `SHA256SUMS.txt`) is classified as `checksum_matched`. That
@@ -52,9 +63,12 @@ independent trust anchor. Without a matching digest the wheel is
 `available_unverified` (never plain `available`).
 
 `network_required: false` appears only when `offline_basis` is
-`self_attested_checksum`: checksum matched **and** dependency wheels such as
-`jsonschema*.whl` are present beside the AEF wheel. Otherwise the proposal pins
-against PyPI:
+`self_attested_checksum`: checksum matched **and** a non-empty `jsonschema-*.whl`
+wheel (not `jsonschema-specifications-*`) is present beside the AEF wheel.
+This does **not** guarantee a complete air-gap install: transitive dependencies
+(`attrs`, `referencing`, `rpds-py`, and others) are not verified. Treat offline
+mode as a convenience hint, not a promise. Otherwise the proposal pins against
+PyPI:
 
 ```console
 python -m venv /path/to/project/.aef-venv

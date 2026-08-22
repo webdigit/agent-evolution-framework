@@ -37,7 +37,6 @@ DOCTOR_RESULT_FIELDS = (
     "venv_status",
     "network_required",
     "local_artifact",
-    "human_action_required",
     "install_command",
     "decision",
     "blocked_cause",
@@ -128,12 +127,23 @@ def _expected_hash(wheel: Path, workspace: Path) -> str | None:
 
 
 def dependency_wheels_present(directory: Path) -> bool:
-    """Offline install needs at least jsonschema among dependency wheels."""
+    """Offline install needs a real ``jsonschema-*.whl`` wheel beside the AEF wheel.
+
+    A prefix match alone is not enough: ``jsonschema-specifications`` and empty
+    placeholder files must not justify ``network_required: false``.
+    """
     if not directory.is_dir():
         return False
     for item in directory.iterdir():
-        if item.is_file() and item.name.startswith(JSONSCHEMA_WHEEL_PREFIX) and item.suffix == ".whl":
-            return True
+        if not item.is_file() or item.suffix != ".whl":
+            continue
+        if not item.name.startswith(JSONSCHEMA_WHEEL_PREFIX):
+            continue
+        if item.name.startswith("jsonschema-specifications-"):
+            continue
+        if item.stat().st_size == 0:
+            continue
+        return True
     return False
 
 
@@ -241,17 +251,6 @@ def proposed_install_command_from_spec(
     )
 
 
-def proposed_install_command(*, wheel: Path | None, version: str, isolated_dir: str) -> str:
-    """Back-compat wrapper; prefer resolve_package_install_spec + from_spec."""
-    artifact = "checksum_matched" if wheel is not None else "absent"
-    spec = resolve_package_install_spec(
-        expected_package_version=version,
-        artifact=artifact,
-        wheel=wheel,
-    )
-    return proposed_install_command_from_spec(spec, isolated_dir)
-
-
 def isolated_dir_python(isolated_dir: str) -> str:
     if host_platform() == "windows":
         return f"{isolated_dir}\\Scripts\\python.exe"
@@ -262,6 +261,27 @@ def isolated_env_name(venv_status: str) -> str:
     if venv_status == "incompatible":
         return f".aef-venv-{host_platform()}"
     return ".aef-venv"
+
+
+def candidate_isolated_env_paths(workspace: Path, venv_status: str) -> list[Path]:
+    """Ordered install targets: primary then platform-suffixed name."""
+    primary = workspace / isolated_env_name(venv_status)
+    paths = [primary]
+    platform_named = workspace / isolated_env_name("incompatible")
+    if platform_named != primary:
+        paths.append(platform_named)
+    return paths
+
+
+def resolve_proposed_env_path(workspace: Path, venv_status: str) -> Path:
+    """First free isolated-env path for a copyable install proposal."""
+    candidates = candidate_isolated_env_paths(workspace, venv_status)
+    for candidate in candidates:
+        if not candidate.exists():
+            return candidate
+    if len(candidates) > 1:
+        return candidates[1]
+    return candidates[0]
 
 
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
@@ -276,6 +296,8 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     )
     blocked_cause = discovered.get("blocked_cause")
     observations: list[str] = []
+    if discovered["discovery_method"] == "declared_env":
+        observations.append("declared_env_version_from_tree")
     if artifact == "ambiguous":
         if decision == DECISION_OK:
             observations.append("ambiguous_local_wheels")
@@ -283,7 +305,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             decision = DECISION_BLOCKED
             blocked_cause = "ambiguous_local_wheels"
     initialized = _workspace_initialized(workspace)
-    env_path = str((workspace / isolated_env_name(discovered["venv_status"])).resolve())
+    env_path = str(resolve_proposed_env_path(workspace, discovered["venv_status"]).resolve())
     offline_ready = (
         artifact == "checksum_matched"
         and wheel is not None
@@ -291,15 +313,12 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     )
     offline_basis = "self_attested_checksum" if offline_ready else None
     if decision == DECISION_OK:
-        human_action = False
         network_required = False
         install_command = ""
     elif decision == DECISION_BLOCKED:
-        human_action = False
-        network_required = not offline_ready
+        network_required = False
         install_command = ""
     else:
-        human_action = decision == DECISION_INSTALL_REQUIRED
         if offline_ready:
             spec = resolve_package_install_spec(
                 expected_package_version=expected,
@@ -321,11 +340,10 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "discovery_method": discovered["discovery_method"],
         "found_package_version": discovered["found_package_version"],
         "expected_package_version": expected,
-        "workspace_compatible": initialized if initialized is not None else "unknown",
+        "workspace_compatible": initialized,
         "venv_status": discovered["venv_status"],
         "network_required": network_required,
         "local_artifact": artifact,
-        "human_action_required": human_action,
         "install_command": install_command,
         "decision": decision,
         "blocked_cause": blocked_cause,

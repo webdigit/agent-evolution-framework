@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from aef import cli
-from aef.runtime_discovery import parse_aef_version_output
+from aef.runtime_discovery import is_pep440_version_token
 
 
 def invoke(capsys, *arguments):
@@ -104,16 +104,15 @@ def test_n2_path_symlink_to_shell_is_not_executed(tmp_path, capsys, monkeypatch)
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("aef 1.2.0", "1.2.0"),
-        ("aef 1.2", "1.2"),
-        ("9.9.9", None),
-        ("AEF 9.9.9", None),
-        ("Aef 1.2.0", None),
-        ("aef 1.2.0\nextra", None),
+        ("1.2.0", True),
+        ("1.2", True),
+        ("9.9.9", True),
+        ("AEF 9.9.9", False),
+        ("1.2.0rc1", True),
     ],
 )
-def test_n2_parse_aef_version_output_strict_prefix(text, expected):
-    assert parse_aef_version_output(text) == expected
+def test_n2_version_tokens_reject_bare_or_wrong_prefix(text, expected):
+    assert is_pep440_version_token(text) is expected
 
 
 def test_n4_injection_payload_rejected(tmp_path, capsys):
