@@ -6,12 +6,12 @@ import json
 import os
 import platform
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 from ._version import __version__
+from .filesystem import is_link_or_reparse_point
+from .upgrade_compat import MAX_FILE_BYTES
 
 DECISION_OK = "OK"
 DECISION_INSTALL_REQUIRED = "INSTALL_REQUIRED"
@@ -23,11 +23,16 @@ RUNTIME_REQUIREMENTS_PATH = ".agent/runtime-requirements.json"
 CANDIDATE_VENV_NAMES = (".aef-venv", ".venv", "venv")
 WHEEL_NAME_PREFIX = "agent_evolution_framework-"
 VERSION_PATTERN = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.M)
-VERSION_TOKEN = re.compile(r"^\d+\.\d+\.\d+[0-9A-Za-z._+-]*$")
+SHELL_UNSAFE_VERSION = re.compile(r'[&|;<>`$"\'\\\s\n\r]')
+PEP440_VERSION = re.compile(
+    r"^(?:\d+!)?"
+    r"(?:[0-9]+(?:\.[0-9A-Za-z]+)*|[0-9]*\.[0-9]+(?:\.[0-9A-Za-z]+)*)"
+    r"(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)\d*)?"
+    r"(?:\.post[0-9]+)?"
+    r"(?:\.dev[0-9]+)?"
+    r"(?:\+[a-zA-Z0-9.]+)?$"
+)
 WINDOWS_HOME = re.compile(r"^[A-Za-z]:[\\/]")
-PATH_VERSION_TIMEOUT = 10
-
-Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def host_platform() -> str:
@@ -45,6 +50,13 @@ def host_architecture() -> str:
 def interpreter_label(executable: str | None = None) -> str:
     _ = executable
     return f"{platform.python_implementation()}-{platform.python_version()}"
+
+
+def is_pep440_version_token(value: str) -> bool:
+    """Accept PEP 440 public versions; reject shell metacharacters."""
+    if not value or SHELL_UNSAFE_VERSION.search(value):
+        return False
+    return bool(PEP440_VERSION.fullmatch(value))
 
 
 def parse_pyvenv_cfg(text: str) -> dict[str, str]:
@@ -94,13 +106,6 @@ def inspect_venv_tree(root: Path) -> str:
     return "absent"
 
 
-def path_binary_compatible(path: Path) -> bool:
-    name = path.name.lower()
-    if host_platform() == "windows":
-        return name in {"aef.exe", "aef.cmd", "aef.bat", "aef"}
-    return name == "aef"
-
-
 def module_importable() -> bool:
     try:
         import aef  # noqa: F401
@@ -120,7 +125,7 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
 def parse_aef_version_output(text: str) -> str | None:
     """Strictly parse `aef --version` / package version output.
 
-    Requires the exact lowercase prefix ``aef`` then a VERSION_TOKEN.
+    Requires the exact lowercase prefix ``aef`` then a PEP 440 token.
     Bare versions and wrong-case prefixes are rejected.
     """
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
@@ -130,34 +135,26 @@ def parse_aef_version_output(text: str) -> str | None:
     if len(parts) != 2 or parts[0] != "aef":
         return None
     candidate = parts[1]
-    if VERSION_TOKEN.fullmatch(candidate):
+    if is_pep440_version_token(candidate):
         return candidate
     return None
 
 
-def probe_path_package_version(
-    binary: Path,
-    *,
-    runner: Runner = subprocess.run,
-    timeout: float = PATH_VERSION_TIMEOUT,
-) -> str | None:
-    """Execute a binary --version under explicit consent (e.g. --reuse-env).
-
-    Default discover_runtime never calls this helper.
-    """
+def _read_bounded_utf8(path: Path, workspace: Path) -> str | None:
+    """Read up to MAX_FILE_BYTES; refuse links that escape the workspace."""
     try:
-        completed = runner(
-            [str(binary), "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        if is_link_or_reparse_point(path):
+            if not workspace_contains(workspace, path):
+                return None
+            resolved = path.resolve()
+            if not workspace_contains(workspace, resolved):
+                return None
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            return None
+        return path.read_text(encoding="utf-8")
+    except OSError:
         return None
-    if completed.returncode != 0:
-        return None
-    return parse_aef_version_output(completed.stdout or "")
 
 
 def read_expected_package_version(workspace: Path) -> dict[str, Any]:
@@ -166,10 +163,12 @@ def read_expected_package_version(workspace: Path) -> dict[str, Any]:
     path = workspace / rel
     if not path.is_file():
         return {"status": "absent", "value": None, "path": rel}
+    text = _read_bounded_utf8(path, workspace)
+    if text is None:
+        return {"status": "invalid", "value": None, "path": rel}
     try:
-        text = path.read_text(encoding="utf-8")
         payload = json.loads(text)
-    except (OSError, json.JSONDecodeError, UnicodeError):
+    except (json.JSONDecodeError, UnicodeError):
         return {"status": "invalid", "value": None, "path": rel}
     if not isinstance(payload, dict):
         return {"status": "invalid", "value": None, "path": rel}
@@ -178,7 +177,7 @@ def read_expected_package_version(workspace: Path) -> dict[str, Any]:
     value = payload["expected_package_version"]
     if isinstance(value, str) and value.strip():
         stripped = value.strip()
-        if VERSION_TOKEN.fullmatch(stripped):
+        if is_pep440_version_token(stripped):
             return {"status": "valid", "value": stripped, "path": rel}
         return {"status": "invalid", "value": None, "path": rel}
     return {"status": "invalid", "value": None, "path": rel}
@@ -198,14 +197,13 @@ def venv_has_aef_package(venv: Path) -> bool:
     return any((root / "__init__.py").is_file() for root in _aef_package_roots(venv))
 
 
-def read_aef_version_from_tree(venv: Path) -> str | None:
+def read_aef_version_from_tree(venv: Path, workspace: Path) -> str | None:
     for root in _aef_package_roots(venv):
         version_file = root / "_version.py"
         if not version_file.is_file():
             continue
-        try:
-            text = version_file.read_text(encoding="utf-8")
-        except OSError:
+        text = _read_bounded_utf8(version_file, workspace)
+        if text is None:
             continue
         match = VERSION_PATTERN.search(text)
         if match:
@@ -261,7 +259,7 @@ def wheel_version_from_filename(name: str) -> str | None:
     if len(parts) < 4:
         return None
     version = "-".join(parts[:-3])
-    if VERSION_TOKEN.fullmatch(version):
+    if is_pep440_version_token(version):
         return version
     return None
 
@@ -322,38 +320,33 @@ def select_local_wheel(
 def discover_runtime(
     workspace: Path,
     *,
-    path_lookup=None,
-    can_import=None,
-    path_version_runner: Runner | None = None,
+    can_import: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Deterministic discovery. Never executes a PATH or foreign-venv binary.
-
-    PATH hits are ignored for PASS: default discovery never probes PATH
-    binaries (Lot 2 bis N2). ``path_lookup`` / ``path_version_runner`` remain
-    for API compatibility but do not grant ``discovery_method=path``.
-    Fall through to ``python_module`` (import) or ``declared_env`` (tree read).
-    """
-    _ = path_lookup or shutil.which
-    _ = path_version_runner
+    """Deterministic discovery. Never executes a PATH or foreign-venv binary."""
     imported = (can_import or module_importable)()
     venv_status = summarize_venv_status(workspace)
-    declared_ready = False
-    declared_version = None
-    if venv_status == "compatible":
-        for candidate in find_declared_envs(workspace):
-            if inspect_venv_tree(candidate) == "compatible" and venv_has_aef_package(candidate):
-                declared_ready = True
-                declared_version = read_aef_version_from_tree(candidate)
-                break
     if imported:
         method = "python_module"
         version = found_package_version(imported=True)
-    elif declared_ready:
-        method = "declared_env"
-        version = declared_version
     else:
-        method = "none"
-        version = None
+        declared_version = None
+        declared_ready = False
+        if venv_status == "compatible":
+            for candidate in find_declared_envs(workspace):
+                if inspect_venv_tree(candidate) != "compatible":
+                    continue
+                if not venv_has_aef_package(candidate):
+                    continue
+                declared_version = read_aef_version_from_tree(candidate, workspace)
+                if declared_version is not None:
+                    declared_ready = True
+                    break
+        if declared_ready:
+            method = "declared_env"
+            version = declared_version
+        else:
+            method = "none"
+            version = None
     expected_info = read_expected_package_version(workspace)
     if expected_info["status"] == "invalid":
         return {

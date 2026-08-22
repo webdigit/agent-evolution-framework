@@ -8,8 +8,7 @@ import pytest
 
 from aef import cli
 from aef.runtime_discovery import discover_runtime
-from aef.runtime_install import InstallRefused, install_isolated
-from tests.test_runtime_discovery import no_path, write_venv
+from tests.test_runtime_discovery import write_venv
 
 
 SENTINEL = "AEF_RUNTIME_SENTINEL_DO_NOT_LEAK_7c1e"
@@ -23,7 +22,7 @@ def invoke(capsys, *arguments):
     return code, envelope, captured
 
 
-def test_doctor_and_install_never_leak_exterior_sentinels(tmp_path, capsys, monkeypatch):
+def test_doctor_never_leaks_exterior_sentinels(tmp_path, capsys, monkeypatch):
     exterior = tmp_path / "outside"
     exterior.mkdir()
     (exterior / "memory.json").write_text(SENTINEL, encoding="utf-8")
@@ -48,17 +47,6 @@ def test_doctor_and_install_never_leak_exterior_sentinels(tmp_path, capsys, monk
     assert str(Path.home()) not in dumped
     assert code == 0
     assert envelope["status"] == "PASS"
-
-    code, envelope, captured = invoke(
-        capsys, "--json", "--workspace", str(workspace), "doctor", "--install",
-    )
-    dumped = json.dumps(envelope) + captured.out + captured.err
-    assert SENTINEL not in dumped
-    assert SENTINEL_PATH not in dumped
-    assert str(exterior) not in dumped
-    assert str(Path.home()) not in dumped
-    assert code == 0
-    assert envelope["status"] == "NO_CHANGE"
     assert (workspace / "AGENTS.md").read_text(encoding="utf-8") == "user bootstrap\n"
     assert list(exterior.iterdir())
 
@@ -73,41 +61,12 @@ def test_foreign_venv_is_never_executed(tmp_path, monkeypatch):
     if posix.is_file():
         posix.write_bytes(b"must-not-run")
 
-    def fail(*_args, **_kwargs):
-        raise AssertionError("foreign venv must not be spawned")
-
-    monkeypatch.setattr("aef.runtime_install.subprocess.run", fail)
-    discovered = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
-    )
+    discovered = discover_runtime(tmp_path, can_import=lambda: False)
     assert discovered["venv_status"] == "incompatible"
-    with pytest.raises(InstallRefused):
-        install_isolated(tmp_path, consented=False, **{
-            "path_lookup": no_path, "can_import": lambda: False,
-        })
     if exe.is_file():
         assert exe.read_bytes() == b"must-not-run"
     if posix.is_file():
         assert posix.read_bytes() == b"must-not-run"
-
-
-def test_symlink_outside_workspace_blocks_install(tmp_path):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    workspace = tmp_path / "project"
-    workspace.mkdir()
-    try:
-        (workspace / ".aef-venv").symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("symlink creation is not available")
-    with pytest.raises(InstallRefused):
-        install_isolated(
-            workspace,
-            consented=True,
-            path_lookup=no_path,
-            can_import=lambda: False,
-        )
-    assert list(outside.iterdir()) == []
 
 
 def test_runtime_instruction_contract():
@@ -117,6 +76,8 @@ def test_runtime_instruction_contract():
     assert "python -m venv" in text
     assert "python -m pip" in text or "python -m aef" in text
     assert "aef --json doctor" in text
+    assert "manually" in text.lower()
+    assert "--install" not in text
     lowered = text.lower()
     for vendor in ("claude", "chatgpt", "gemini", "cursor", "cowork", "openai"):
         assert vendor not in lowered

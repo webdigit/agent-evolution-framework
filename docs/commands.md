@@ -201,21 +201,18 @@ trigger an upgrade.
 ```console
 aef doctor
 aef --json doctor
-aef doctor --install
-aef doctor --install --reuse-env
 ```
 
-Read-only runtime diagnosis. `doctor` does not write under `.agent/` and does
-not modify an existing virtual environment. Without flags it does not execute
-third-party binaries from `PATH`. Use `--json` before the command.
+Read-only runtime diagnosis. `doctor` does not write under `.agent/`, does not
+modify an existing virtual environment, and does not run `pip` or create
+environments. Without flags it does not execute third-party binaries from
+`PATH`. Use `--json` before the command.
 
-A compatible runtime returns `PASS` (exit 0). A missing or incompatible
-runtime returns `INSTALL_REQUIRED` (exit 8) with a pinned Python install
-proposal. `--install` is explicit consent to that proposal; without it, AEF
-does not run `pip`. `--reuse-env` additionally allows probing a pre-existing
-`.aef-venv` or `.aef-venv-<platform>` interpreter during `--install`. After a
-consented install, AEF runs `--version` and, when `.agent/manifest.json`
-already exists, `audit`. See [Runtime bootstrap](runtime.md).
+A compatible runtime returns `PASS` (exit 0). A missing or incompatible runtime
+returns `INSTALL_REQUIRED` (exit 8) with a pinned, workspace-absolute Python
+install proposal in `install_command`. The operator runs that command manually
+after review. Automated installation from `doctor` is deferred to a later
+release. See [Runtime bootstrap](runtime.md).
 
 There is no `aef update` command. `upgrade` migrates workspace files only.
 

@@ -30,13 +30,6 @@ from .upgrade_plan import MigrationFailure
 from .upgrade_ops import run_upgrade
 from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
 from .runtime_doctor import diagnose_runtime
-from .runtime_install import (
-    InstallRefused,
-    cleanup_failed_install,
-    install_isolated,
-    truncate_detail,
-    verify_installed,
-)
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -589,12 +582,6 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Venv      : {venv_status}\n"
                     f"Workspace : {workspace}\n"
                 )
-            if status == "CHANGE":
-                return (
-                    "[OK] AEF runtime was installed\n\n"
-                    f"Platform  : {platform_name}\n"
-                    f"Workspace : {workspace}\n"
-                )
             if status == "INSTALL_REQUIRED":
                 command_line = _escape_human_value(result.get("install_command") or "")
                 return (
@@ -604,7 +591,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Expected  : {expected}\n"
                     f"Venv      : {venv_status}\n"
                     f"Install   : {command_line}\n"
-                    "Consent   : re-run with --install after review\n"
+                    "Action    : run the Install command manually after review\n"
                     f"Workspace : {workspace}\n"
                 )
             if status == "BLOCKED":
@@ -908,21 +895,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="diagnose the AEF Python runtime",
         description=(
             "Diagnose whether a compatible AEF runtime is executable. "
-            "Does not modify .agent/. Use --install only after explicit consent."
-        ),
-    )
-    doctor_parser.add_argument(
-        "--install",
-        action="store_true",
-        help="consent to the proposed isolated Python installation",
-    )
-    doctor_parser.add_argument(
-        "--reuse-env",
-        action="store_true",
-        help=(
-            "allow probing a pre-existing .aef-venv or .aef-venv-<platform> "
-            "interpreter during --install; without this flag a fresh env is "
-            "created under a free name and existing interpreters are never executed"
+            "Read-only: does not modify .agent/, create environments, or run pip. "
+            "When installation is required, the result includes a copyable command "
+            "for the operator to run manually."
         ),
     )
     ingest_parser = commands.add_parser(
@@ -1801,10 +1776,8 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return _run_evaluate(args)
 
 
-def _doctor_status_from_decision(decision: str, *, after_install: bool, changed: bool) -> tuple[str, bool]:
+def _doctor_status_from_decision(decision: str) -> tuple[str, bool]:
     if decision == "OK":
-        if after_install:
-            return ("CHANGE" if changed else "NO_CHANGE"), True
         return "PASS", True
     if decision == DECISION_INSTALL_REQUIRED:
         return DECISION_INSTALL_REQUIRED, False
@@ -1817,64 +1790,7 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     workspace = Path(args.workspace).resolve()
     result = diagnose_runtime(workspace)
     decision = result["decision"]
-    if args.install:
-        reuse_env = bool(getattr(args, "reuse_env", False))
-        installed = install_isolated(
-            workspace, consented=True, reuse_env=reuse_env,
-        )
-        verification = None
-        diff = {"created": [], "modified": [], "removed": []}
-        if installed["changed"]:
-            python = Path(installed["python"])
-            expected = installed.get("install_pin") or result.get("expected_package_version")
-            verification = verify_installed(
-                python, workspace, expected_version=expected,
-            )
-            if not verification["version_ok"]:
-                env_path = Path(installed["env_path"])
-                cleaned = cleanup_failed_install(env_path)
-                created = [] if cleaned else [env_path.name]
-                raise InstallRefused(
-                    "installed runtime version does not match the expected pin",
-                    reason="verify_mismatch",
-                    diagnosis=installed.get("diagnosis"),
-                    detail=verification.get("version_output"),
-                    created=created,
-                )
-            rel = Path(installed["env_path"]).name
-            diff = {"created": [rel], "modified": [], "removed": []}
-        result = diagnose_runtime(workspace)
-        if verification is not None:
-            result["verification"] = {
-                "version_ok": verification["version_ok"],
-                "audit_ran": verification["audit_ran"],
-                "reported_version": verification.get("reported_version"),
-            }
-        status, ok = _doctor_status_from_decision(
-            result["decision"],
-            after_install=True,
-            changed=bool(installed["changed"]),
-        )
-        meta = {
-            "install": installed.get("reason", "installed"),
-            "reuse_env": reuse_env,
-        }
-        if result.get("blocked_cause"):
-            meta["blocked_cause"] = result["blocked_cause"]
-        if result.get("blocked_path"):
-            meta["blocked_path"] = result["blocked_path"]
-        envelope = _envelope(
-            command="DOCTOR",
-            workspace=workspace,
-            status=status,
-            ok=ok,
-            dry_run=False,
-            result=result,
-            meta=meta,
-            diff=diff,
-        )
-        return envelope, _exit_code("DOCTOR", status)
-    status, ok = _doctor_status_from_decision(decision, after_install=False, changed=False)
+    status, ok = _doctor_status_from_decision(decision)
     meta: dict[str, Any] = {}
     if result.get("blocked_cause"):
         meta["blocked_cause"] = result["blocked_cause"]
@@ -2068,35 +1984,6 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 5
-    elif isinstance(exc, InstallRefused):
-        diagnosis = getattr(exc, "diagnosis", None) or {}
-        meta = {
-            "reason": getattr(exc, "reason", None) or "install_refused",
-        }
-        detail = truncate_detail(getattr(exc, "detail", None))
-        if detail:
-            meta["detail"] = detail
-        if diagnosis.get("blocked_cause"):
-            meta["blocked_cause"] = diagnosis["blocked_cause"]
-        if diagnosis.get("blocked_path"):
-            meta["blocked_path"] = diagnosis["blocked_path"]
-        created = list(getattr(exc, "created", None) or [])
-        diff = (
-            {"created": created, "modified": [], "removed": []}
-            if created
-            else None
-        )
-        envelope = _envelope(
-            command=str(getattr(args, "command", "doctor")).upper(),
-            workspace=args.workspace,
-            status="BLOCKED",
-            ok=False,
-            dry_run=False,
-            result=dict(diagnosis) if isinstance(diagnosis, dict) else {},
-            meta=meta,
-            diff=diff,
-        )
-        return envelope, 4
     elif isinstance(exc, ClaudeIntegrationFilesystemError):
         code = "claude_integration_filesystem_error"
         message = "The Claude project integration could not be written safely."

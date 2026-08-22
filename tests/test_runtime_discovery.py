@@ -62,7 +62,7 @@ def test_expected_package_version_is_not_framework_or_schema(tmp_path):
     assert expected["status"] == "valid"
     assert expected["value"] == "1.2.0"
     discovered = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
+        tmp_path, can_import=lambda: False,
     )
     assert discovered["expected_package_version"] == "1.2.0"
     assert "framework_version" not in discovered
@@ -97,14 +97,14 @@ def test_inspect_venv_tree_never_spawns(monkeypatch, tmp_path, host, kind, expec
 def test_empty_venv_is_not_a_declared_runtime(tmp_path, monkeypatch):
     write_venv(tmp_path / ".aef-venv", kind="windows" if __import__("os").name == "nt" else "posix")
     discovered = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
+        tmp_path, can_import=lambda: False,
     )
     assert discovered["discovery_method"] == "none"
     assert discovered["decision"] == DECISION_INSTALL_REQUIRED
     assert discovered["venv_status"] == "compatible"
 
 
-def test_discovery_order_path_then_module_then_declared(tmp_path, monkeypatch):
+def test_discovery_order_module_then_declared(tmp_path):
     write_venv(tmp_path / ".aef-venv", kind="windows" if __import__("os").name == "nt" else "posix")
     pkg = tmp_path / ".aef-venv" / ("Lib" if __import__("os").name == "nt" else "lib/python3.11")
     pkg = pkg / "site-packages" / "aef"
@@ -113,36 +113,14 @@ def test_discovery_order_path_then_module_then_declared(tmp_path, monkeypatch):
     (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
     (tmp_path / "aef").write_bytes(b"")
     (tmp_path / "aef.exe").write_bytes(b"")
-    monkeypatch.setattr(
-        "aef.runtime_discovery.path_binary_compatible",
-        lambda path: path.name.lower() in {"aef", "aef.exe"},
-    )
 
-    def path_version_runner(command, **_kwargs):
-        return subprocess.CompletedProcess(command, 0, stdout="aef 1.2.0\n", stderr="")
-
-    # N2: PATH hit must not become discovery_method=path or execute the binary
-    path_ignored = discover_runtime(
-        tmp_path,
-        path_lookup=lambda name: str(tmp_path / ("aef.exe" if name.endswith(".exe") else "aef")),
-        can_import=lambda: False,
-        path_version_runner=path_version_runner,
-    )
-    assert path_ignored["discovery_method"] != "path"
-    assert path_ignored["discovery_method"] == "declared_env"
-    assert path_ignored["found_package_version"] == "1.2.0"
-
-    module_hit = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: True,
-    )
-    assert module_hit["discovery_method"] == "python_module"
-
-    declared = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
-    )
+    declared = discover_runtime(tmp_path, can_import=lambda: False)
     assert declared["discovery_method"] == "declared_env"
     assert declared["found_package_version"] == "1.2.0"
     assert declared["decision"] == DECISION_OK
+
+    module_hit = discover_runtime(tmp_path, can_import=lambda: True)
+    assert module_hit["discovery_method"] == "python_module"
 
 
 def test_pin_mismatch_requires_install(tmp_path):
@@ -153,7 +131,7 @@ def test_pin_mismatch_requires_install(tmp_path):
         encoding="utf-8",
     )
     discovered = discover_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: True,
+        tmp_path, can_import=lambda: True,
     )
     assert discovered["decision"] == DECISION_INSTALL_REQUIRED
     assert discovered["found_package_version"] != "9.9.9"
@@ -164,7 +142,7 @@ def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
         AssertionError("doctor must not spawn")
     ))
     result = diagnose_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
+        tmp_path, can_import=lambda: False,
     )
     assert tuple(result) == DOCTOR_RESULT_FIELDS
     assert result["decision"] == DECISION_INSTALL_REQUIRED
@@ -189,10 +167,11 @@ def test_local_wheel_announces_offline_install(tmp_path):
     (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
     (tmp_path / "jsonschema-4.0.0-py3-none-any.whl").write_bytes(b"dep")
     result = diagnose_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
+        tmp_path, can_import=lambda: False,
     )
-    assert result["local_artifact"] == "verified"
+    assert result["local_artifact"] == "checksum_matched"
     assert result["network_required"] is False
+    assert result["offline_basis"] == "self_attested_checksum"
     assert "--no-index" in result["install_command"]
 
 
@@ -200,7 +179,7 @@ def test_unverified_wheel_is_not_presented_as_available(tmp_path):
     wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     wheel.write_bytes(b"wheel")
     result = diagnose_runtime(
-        tmp_path, path_lookup=no_path, can_import=lambda: False,
+        tmp_path, can_import=lambda: False,
     )
     assert result["local_artifact"] == "available_unverified"
     assert result["network_required"] is True
@@ -231,7 +210,7 @@ def test_external_env_is_blocked(tmp_path):
     except OSError:
         pytest.skip("symlink creation is not available")
     discovered = discover_runtime(
-        workspace, path_lookup=no_path, can_import=lambda: False,
+        workspace, can_import=lambda: False,
     )
     assert discovered["decision"] == DECISION_BLOCKED
     assert discovered["external_env"] is True

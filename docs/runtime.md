@@ -13,11 +13,15 @@ aef doctor
 aef --json doctor
 ```
 
-`doctor` inspects the runtime. It does not write under `.agent/`, and it does
-not modify an existing virtual environment. Without `--install` or
-`--reuse-env`, AEF does not execute third-party binaries found on `PATH`
-(including a binary named `aef`); discovery falls through to the running
+`doctor` is **read-only**. It inspects the runtime. It does not write under
+`.agent/`, does not modify an existing virtual environment, does not run `pip`,
+and does not create environments. AEF does not execute third-party binaries
+found on `PATH` (including a binary named `aef`); discovery uses the running
 Python module or a tree read of a declared project environment.
+
+Automated installation from `doctor` is planned for a later release.
+Until then, when installation is required, `doctor` returns a **copyable command**
+for the operator to run manually after review.
 
 ## When the runtime is missing
 
@@ -25,56 +29,40 @@ If `aef` and `python -m aef` cannot run, or `doctor` returns
 `INSTALL_REQUIRED`, stop. Do not invent workspace state. Do not create, edit,
 or delete files under `.agent/state/`.
 
-Propose an isolated, pinned install. Wait for explicit consent. Consent is the
-`--install` flag after the proposed command has been reviewed:
+Review the `install_command` in the `doctor` result, then run it manually in
+a shell from any working directory — paths are workspace-absolute so the
+target `.aef-venv` is always created beside the project:
 
 ```console
-aef doctor --install
+aef --json doctor
+# copy install_command from the JSON result and run it
 ```
 
-Without `--install`, AEF does not run `pip`, create a virtual environment,
-download a package, or execute third-party binaries from `PATH`.
-
-## Isolated install
+## Isolated install (manual)
 
 The default target is a project-local environment named `.aef-venv`. When that
-name already holds an environment from another platform, AEF uses
+name already holds an environment from another platform, the proposal uses
 `.aef-venv-<platform>` instead. An existing `.venv` or `.aef-venv` is never
 rewritten.
 
-Without `--reuse-env`, `doctor --install` never executes a Python interpreter
-that already existed before this invocation. If `.aef-venv` is occupied, AEF
-creates a fresh environment under a free distinct name (typically
-`.aef-venv-<platform>`) or refuses reuse. With `--reuse-env`, AEF may probe
-an existing `.aef-venv` **or** `.aef-venv-<platform>` interpreter only.
+A local wheel whose digest matches a co-located sidecar
+(`.whl.sha256` or `SHA256SUMS.txt`) is classified as `checksum_matched`. That
+attests **internal consistency of a pair supplied by the same source** — not an
+independent trust anchor. Without a matching digest the wheel is
+`available_unverified` (never plain `available`).
 
-A local wheel whose hash matches is classified as `verified`. Without a
-matching digest it is `available_unverified` (never plain `available`). Offline
-`network_required: false` additionally requires dependency wheels in the same
-find-links directory (at least `jsonschema*.whl`):
-
-```console
-python -m venv .aef-venv
-python -m pip install --isolated --no-cache-dir --no-index --find-links . agent_evolution_framework-*.whl
-```
-
-Otherwise the proposed command pins the package against the public index:
+`network_required: false` appears only when `offline_basis` is
+`self_attested_checksum`: checksum matched **and** dependency wheels such as
+`jsonschema*.whl` are present beside the AEF wheel. Otherwise the proposal pins
+against PyPI:
 
 ```console
-python -m venv .aef-venv
-python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
-```
-
-Consent flags:
-
-```console
-aef doctor --install
-aef doctor --install --reuse-env
+python -m venv /path/to/project/.aef-venv
+/path/to/project/.aef-venv/bin/python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
 ```
 
 On Windows, `py -3.11 -m venv` and `.aef-venv\Scripts\python.exe` are the
-equivalent entry points. The host system interpreter is not the install
-target.
+equivalent entry points. The host system interpreter is not the install target.
 
 ## After install
 
@@ -93,6 +81,13 @@ python -m aef audit
 A missing manifest is not an installation failure. `aef upgrade` migrates
 workspace files; it does not install the package. There is no `aef update`
 command.
+
+## Observations
+
+When the runtime is otherwise healthy (`decision: OK`) but multiple local
+wheels are present, `doctor` records `ambiguous_local_wheels` in
+`observations` without blocking. Ambiguity blocks installation only when the
+runtime is not yet valid.
 
 ## Machine result
 

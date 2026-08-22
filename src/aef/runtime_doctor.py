@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .filesystem import is_link_or_reparse_point
 from .runtime_discovery import (
     DECISION_BLOCKED,
     DECISION_INSTALL_REQUIRED,
@@ -20,7 +21,7 @@ from .runtime_discovery import (
     select_local_wheel,
     workspace_contains,
 )
-from .upgrade_compat import installed_package_version
+from .upgrade_compat import MAX_FILE_BYTES, installed_package_version
 
 PYPI_INDEX_URL = "https://pypi.org/simple"
 JSONSCHEMA_WHEEL_PREFIX = "jsonschema-"
@@ -41,12 +42,14 @@ DOCTOR_RESULT_FIELDS = (
     "decision",
     "blocked_cause",
     "blocked_path",
+    "observations",
+    "offline_basis",
 )
 
 
 @dataclass(frozen=True)
 class PackageInstallSpec:
-    """Single source of truth for proposed and executed package install."""
+    """Single source of truth for proposed package install commands."""
 
     mode: str  # "wheel" | "pypi"
     pin_version: str
@@ -64,7 +67,19 @@ def _workspace_initialized(workspace: Path) -> bool | None:
     return manifest.is_file()
 
 
-def _hash_file(path: Path) -> str:
+def _hash_file(path: Path, workspace: Path) -> str | None:
+    try:
+        if is_link_or_reparse_point(path):
+            if not workspace_contains(workspace, path):
+                return None
+            resolved = path.resolve()
+            if not workspace_contains(workspace, resolved):
+                return None
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            return None
+    except OSError:
+        return None
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
@@ -72,15 +87,36 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _expected_hash(wheel: Path) -> str | None:
+def _read_checksum_sidecar(path: Path, workspace: Path) -> str | None:
+    try:
+        if is_link_or_reparse_point(path):
+            if not workspace_contains(workspace, path):
+                return None
+            resolved = path.resolve()
+            if not workspace_contains(workspace, resolved):
+                return None
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            return None
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return text
+
+
+def _expected_hash(wheel: Path, workspace: Path) -> str | None:
+    """Return a digest from a sidecar supplied alongside the wheel.
+
+  This attests internal consistency of a co-located pair only — not an
+  independent trust anchor.
+    """
     sibling = Path(str(wheel) + ".sha256")
     sums = wheel.parent / "SHA256SUMS.txt"
     for candidate in (sibling, sums):
         if not candidate.is_file():
             continue
-        try:
-            text = candidate.read_text(encoding="utf-8")
-        except OSError:
+        text = _read_checksum_sidecar(candidate, workspace)
+        if text is None:
             continue
         for line in text.splitlines():
             parts = line.split()
@@ -108,7 +144,8 @@ def classify_local_artifact(
 ) -> tuple[str, Path | None, list[Path]]:
     """Return (classification, wheel, candidates).
 
-    Classifications: absent | verified | available_unverified | hash_mismatch | ambiguous
+    Classifications: absent | checksum_matched | available_unverified |
+    hash_mismatch | ambiguous
     """
     selection = select_local_wheel(workspace, expected_version=expected_version)
     if selection["status"] == "ambiguous":
@@ -116,15 +153,14 @@ def classify_local_artifact(
     if selection["status"] != "selected" or selection["wheel"] is None:
         return "absent", None, list(selection["candidates"])
     wheel = selection["wheel"]
-    expected = _expected_hash(wheel)
+    expected = _expected_hash(wheel, workspace)
     if expected is None:
         return "available_unverified", wheel, [wheel]
-    try:
-        actual = _hash_file(wheel)
-    except OSError:
+    actual = _hash_file(wheel, workspace)
+    if actual is None:
         return "absent", None, [wheel]
     if actual == expected:
-        return "verified", wheel, [wheel]
+        return "checksum_matched", wheel, [wheel]
     return "hash_mismatch", wheel, [wheel]
 
 
@@ -134,13 +170,13 @@ def resolve_package_install_spec(
     artifact: str,
     wheel: Path | None,
 ) -> PackageInstallSpec:
-    """Compute the one install specification shared by propose and execute.
+    """Compute the install specification for a human-copyable proposal.
 
-    Offline ``--no-index`` wheel install is only for ``verified`` wheels.
+    Offline ``--no-index`` is only proposed for ``checksum_matched`` wheels.
     ``available_unverified`` falls through to the PyPI pin.
     """
     pin = expected_package_version or installed_package_version()
-    if artifact == "verified" and wheel is not None:
+    if artifact == "checksum_matched" and wheel is not None:
         abs_wheel = wheel.resolve()
         find_links = abs_wheel.parent
         pip_args = (
@@ -175,11 +211,7 @@ def resolve_package_install_spec(
 
 
 def _quote_command_part(part: str) -> str:
-    """Quote for a human-copyable shell/cmd line.
-
-    POSIX uses shlex.quote. Windows uses cmd.exe rules: wrap in double quotes
-    and double any embedded double quotes.
-    """
+    """Quote for a human-copyable shell/cmd line."""
     if host_platform() == "windows":
         return '"' + part.replace('"', '""') + '"'
     return shlex.quote(part)
@@ -211,7 +243,7 @@ def proposed_install_command_from_spec(
 
 def proposed_install_command(*, wheel: Path | None, version: str, isolated_dir: str) -> str:
     """Back-compat wrapper; prefer resolve_package_install_spec + from_spec."""
-    artifact = "verified" if wheel is not None else "absent"
+    artifact = "checksum_matched" if wheel is not None else "absent"
     spec = resolve_package_install_spec(
         expected_package_version=version,
         artifact=artifact,
@@ -232,26 +264,8 @@ def isolated_env_name(venv_status: str) -> str:
     return ".aef-venv"
 
 
-def candidate_isolated_env_paths(workspace: Path, venv_status: str) -> list[Path]:
-    """Ordered create/reuse candidates: primary then platform-suffixed name."""
-    primary = workspace / isolated_env_name(venv_status)
-    paths = [primary]
-    platform_named = workspace / isolated_env_name("incompatible")
-    if platform_named != primary:
-        paths.append(platform_named)
-    return paths
-
-
-def resolve_fresh_env_path(workspace: Path, venv_status: str) -> Path | None:
-    """Path ``--install`` would create, or None when every candidate exists."""
-    for candidate in candidate_isolated_env_paths(workspace, venv_status):
-        if not candidate.exists():
-            return candidate
-    return None
-
-
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
-    workspace = Path(workspace)
+    workspace = Path(workspace).resolve()
     discovered = discover_runtime(workspace, **discovery_hooks)
     decision = discovered["decision"]
     if discovered.get("external_env") and decision != DECISION_BLOCKED:
@@ -261,17 +275,21 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         workspace, expected_version=expected,
     )
     blocked_cause = discovered.get("blocked_cause")
-    if artifact == "ambiguous" and decision != DECISION_BLOCKED:
-        decision = DECISION_BLOCKED
-        blocked_cause = "ambiguous_local_wheels"
+    observations: list[str] = []
+    if artifact == "ambiguous":
+        if decision == DECISION_OK:
+            observations.append("ambiguous_local_wheels")
+        elif decision != DECISION_BLOCKED:
+            decision = DECISION_BLOCKED
+            blocked_cause = "ambiguous_local_wheels"
     initialized = _workspace_initialized(workspace)
-    fresh = resolve_fresh_env_path(workspace, discovered["venv_status"])
-    env_name = fresh.name if fresh is not None else isolated_env_name(discovered["venv_status"])
+    env_path = str((workspace / isolated_env_name(discovered["venv_status"])).resolve())
     offline_ready = (
-        artifact == "verified"
+        artifact == "checksum_matched"
         and wheel is not None
         and dependency_wheels_present(wheel.parent)
     )
+    offline_basis = "self_attested_checksum" if offline_ready else None
     if decision == DECISION_OK:
         human_action = False
         network_required = False
@@ -285,7 +303,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         if offline_ready:
             spec = resolve_package_install_spec(
                 expected_package_version=expected,
-                artifact="verified",
+                artifact="checksum_matched",
                 wheel=wheel,
             )
         else:
@@ -295,7 +313,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
                 wheel=None,
             )
         network_required = not offline_ready
-        install_command = proposed_install_command_from_spec(spec, env_name)
+        install_command = proposed_install_command_from_spec(spec, env_path)
     result = {
         "platform": host_platform(),
         "architecture": host_architecture(),
@@ -320,5 +338,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
                 else None
             )
         ),
+        "observations": observations,
+        "offline_basis": offline_basis,
     }
     return result
