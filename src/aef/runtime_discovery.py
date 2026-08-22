@@ -11,6 +11,12 @@ from typing import Any, Callable
 
 from ._version import __version__
 from .filesystem import is_link_or_reparse_point
+from .runtime_confined_io import (
+    RUNTIME_READ_SITES,
+    confined_workspace_read_path,
+    read_text_confined,
+    workspace_contains,
+)
 from .upgrade_compat import MAX_FILE_BYTES
 
 DECISION_OK = "OK"
@@ -84,7 +90,7 @@ def parse_pyvenv_cfg(text: str) -> dict[str, str]:
     return parsed
 
 
-def inspect_venv_tree(root: Path) -> str:
+def inspect_venv_tree(root: Path, workspace: Path) -> str:
     """Classify a directory tree without executing anything inside it."""
     if not root.exists() or not root.is_dir():
         return "absent"
@@ -95,9 +101,12 @@ def inspect_venv_tree(root: Path) -> str:
     ).is_file()
     home = ""
     if cfg.is_file():
+        text = read_text_confined(workspace, cfg, site="declared_env.pyvenv_cfg")
+        if text is None:
+            return "unknown"
         try:
-            home = parse_pyvenv_cfg(cfg.read_text(encoding="utf-8")).get("home", "")
-        except OSError:
+            home = parse_pyvenv_cfg(text).get("home", "")
+        except (ValueError, TypeError):
             return "unknown"
     windows_home = bool(WINDOWS_HOME.match(home)) or home.startswith("\\\\")
     posix_home = home.startswith("/")
@@ -138,45 +147,13 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
 
 
 def confined_workspace_read_path(workspace: Path, target: Path) -> Path | None:
-    """Reject reads whose path chain crosses a link/reparse point or escapes the workspace."""
-    try:
-        root = workspace.resolve()
-        relative = target.relative_to(root)
-    except (OSError, ValueError):
-        return None
-    if not relative.parts or any(part in {"", ".."} for part in relative.parts):
-        return None
-    cursor = root
-    for part in relative.parts:
-        cursor = cursor / part
-        if is_link_or_reparse_point(cursor):
-            try:
-                resolved_link = cursor.resolve()
-            except OSError:
-                return None
-            if not workspace_contains(root, resolved_link):
-                return None
-            return None
-    try:
-        final = target.resolve()
-    except OSError:
-        return None
-    if not workspace_contains(root, final):
-        return None
-    return final
+    from .runtime_confined_io import confined_workspace_read_path as _confined
+
+    return _confined(workspace, target)
 
 
-def _read_bounded_utf8(path: Path, workspace: Path) -> str | None:
-    """Read up to MAX_FILE_BYTES; refuse paths that escape the workspace."""
-    if confined_workspace_read_path(workspace, path) is None:
-        return None
-    try:
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            return None
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+def _read_bounded_utf8(path: Path, workspace: Path, *, site: str) -> str | None:
+    return read_text_confined(workspace, path, site=site)
 
 
 def read_expected_package_version(workspace: Path) -> dict[str, Any]:
@@ -185,7 +162,7 @@ def read_expected_package_version(workspace: Path) -> dict[str, Any]:
     path = workspace / rel
     if not path.is_file():
         return {"status": "absent", "value": None, "path": rel}
-    text = _read_bounded_utf8(path, workspace)
+    text = _read_bounded_utf8(path, workspace, site="agent.runtime_requirements")
     if text is None:
         return {"status": "invalid", "value": None, "path": rel}
     try:
@@ -228,7 +205,7 @@ def read_aef_version_from_tree(venv: Path, workspace: Path) -> tuple[str, Path] 
         version_file = root / "_version.py"
         if not version_file.is_file():
             continue
-        text = _read_bounded_utf8(version_file, workspace)
+        text = _read_bounded_utf8(version_file, workspace, site="declared_env.version_file")
         if text is None:
             continue
         match = VERSION_PATTERN.search(text)
@@ -241,8 +218,14 @@ def read_aef_version_from_tree(venv: Path, workspace: Path) -> tuple[str, Path] 
     return None
 
 
-def declared_env_install_evidence(venv: Path, pkg_root: Path) -> list[str]:
-    """Observable on-disk hints that a declared env was installed, not hand-crafted."""
+def declared_env_install_evidence(
+    venv: Path,
+    pkg_root: Path,
+    workspace: Path,
+) -> list[str]:
+    """Observable, content-checked hints — names alone are not enough."""
+    from .runtime_confined_io import read_text_confined
+
     evidence: list[str] = []
     site_packages = pkg_root.parent
     if site_packages.is_dir():
@@ -252,16 +235,33 @@ def declared_env_install_evidence(venv: Path, pkg_root: Path) -> list[str]:
             base = item.name[: -len(".dist-info")]
             if base not in {"aef",} and not base.startswith("agent_evolution_framework"):
                 continue
-            evidence.append("dist-info")
-            if (item / "RECORD").is_file():
-                evidence.append("record")
+            metadata = item / "METADATA"
+            wheel_file = item / "WHEEL"
+            if not metadata.is_file() or not wheel_file.is_file():
+                continue
+            if read_text_confined(workspace, metadata, site="declared_env.version_file") is None:
+                continue
+            if read_text_confined(workspace, wheel_file, site="declared_env.version_file") is None:
+                continue
+            evidence.append("dist-info-metadata-wheel")
+            record = item / "RECORD"
+            if record.is_file():
+                record_text = read_text_confined(
+                    workspace, record, site="declared_env.version_file",
+                )
+                if record_text and record_text.strip():
+                    evidence.append("record-nonempty")
             break
     if host_platform() == "windows":
         console = venv / "Scripts" / "aef.exe"
     else:
         console = venv / "bin" / "aef"
     if console.is_file():
-        evidence.append("console_script")
+        try:
+            if console.stat().st_size > 0:
+                evidence.append("console_script-nonempty")
+        except OSError:
+            pass
     return evidence
 
 
@@ -273,16 +273,6 @@ def external_declared_env_path(workspace: Path) -> str | None:
             except ValueError:
                 return candidate.name
     return None
-
-
-def workspace_contains(workspace: Path, target: Path) -> bool:
-    try:
-        root = workspace.resolve()
-        resolved = target.resolve()
-        resolved.relative_to(root)
-    except (OSError, ValueError):
-        return False
-    return True
 
 
 def find_declared_envs(workspace: Path) -> list[Path]:
@@ -303,7 +293,7 @@ def summarize_venv_status(workspace: Path) -> str:
     for candidate in find_declared_envs(workspace):
         if not workspace_contains(workspace, candidate):
             return "blocked"
-        statuses.append(inspect_venv_tree(candidate))
+        statuses.append(inspect_venv_tree(candidate, workspace))
     if not statuses:
         return "absent"
     if "incompatible" in statuses and "compatible" not in statuses:
@@ -400,9 +390,10 @@ def discover_runtime(
     declared_version = None
     declared_version_source: Path | None = None
     declared_env_root: Path | None = None
+    declared_env_mismatch: dict[str, str] | None = None
     if venv_status == "compatible":
         for candidate in find_declared_envs(workspace):
-            if inspect_venv_tree(candidate) != "compatible":
+            if inspect_venv_tree(candidate, workspace) != "compatible":
                 continue
             if not venv_has_aef_package(candidate):
                 continue
@@ -411,6 +402,12 @@ def discover_runtime(
                 continue
             version, version_source = tree_read
             if expected is not None and version != expected:
+                if declared_env_mismatch is None:
+                    try:
+                        rel = candidate.relative_to(workspace.resolve()).as_posix()
+                    except ValueError:
+                        rel = candidate.name
+                    declared_env_mismatch = {"path": rel, "version": version}
                 continue
             declared_version = version
             declared_version_source = version_source
@@ -438,6 +435,7 @@ def discover_runtime(
             "declared_version_source": None,
             "declared_env_root": None,
             "declared_env_install_evidence": None,
+            "declared_env_mismatch": None,
             "decision": DECISION_BLOCKED,
         }
     version_ok = version is not None and (expected is None or version == expected)
@@ -457,7 +455,9 @@ def discover_runtime(
     install_evidence = None
     if declared_env_root is not None and declared_version_source is not None:
         pkg_root = declared_version_source.parent
-        install_evidence = declared_env_install_evidence(declared_env_root, pkg_root)
+        install_evidence = declared_env_install_evidence(
+            declared_env_root, pkg_root, workspace,
+        )
     return {
         "discovery_method": method,
         "found_package_version": version,
@@ -474,5 +474,6 @@ def discover_runtime(
         "declared_version_source": declared_version_source,
         "declared_env_root": declared_env_root,
         "declared_env_install_evidence": install_evidence,
+        "declared_env_mismatch": declared_env_mismatch,
         "decision": decision,
     }

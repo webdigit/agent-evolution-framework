@@ -40,21 +40,24 @@ def _write_real_install_markers(env: Path, pkg: Path, *, version: str = "1.2.0")
     site_packages = pkg.parent
     dist = site_packages / f"agent_evolution_framework-{version}.dist-info"
     dist.mkdir(parents=True, exist_ok=True)
-    (dist / "RECORD").write_text("", encoding="utf-8")
+    (dist / "METADATA").write_text("Name: agent-evolution-framework\n", encoding="utf-8")
+    (dist / "WHEEL").write_text("Wheel-Version: 1.0\n", encoding="utf-8")
+    (dist / "RECORD").write_text("aef/_version.py,,\n", encoding="utf-8")
     if os.name == "nt":
         scripts = env / "Scripts"
         scripts.mkdir(parents=True, exist_ok=True)
-        (scripts / "aef.exe").write_bytes(b"")
+        (scripts / "aef.exe").write_bytes(b"x")
     else:
         binary = env / "bin"
         binary.mkdir(parents=True, exist_ok=True)
-        (binary / "aef").write_bytes(b"")
+        (binary / "aef").write_bytes(b"x")
 
 
 def _write_jsonschema_wheel(directory: Path) -> Path:
     dep = directory / "jsonschema-4.22.0-py3-none-any.whl"
     with zipfile.ZipFile(dep, "w") as archive:
-        archive.writestr("dummy.txt", "dep")
+        archive.writestr("jsonschema-4.22.0.dist-info/METADATA", "Name: jsonschema\n")
+        archive.writestr("jsonschema-4.22.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
     return dep
 
 
@@ -280,7 +283,8 @@ def test_install_command_targets_free_env_when_both_primary_names_occupied(tmp_p
         json.dumps({"expected_package_version": "9.9.9"}),
         encoding="utf-8",
     )
-    proposed_path = resolve_proposed_env_path(workspace, "compatible")
+    proposed_path, issue = resolve_proposed_env_path(workspace, "compatible")
+    assert issue is None
     assert not proposed_path.exists()
     code, envelope, _ = invoke(
         capsys, "--json", "--workspace", str(workspace), "doctor",
@@ -337,6 +341,10 @@ def test_stale_only_declared_env_falls_back_to_python_module(tmp_path, monkeypat
     assert result["discovery_method"] == "python_module"
     assert result["found_package_version"] == "1.2.0"
     assert result["decision"] == "OK"
+    assert result["declared_env_mismatch"] == {
+        "path": ".aef-venv",
+        "version": "1.0.0",
+    }
 
 
 def test_satisfying_first_declared_env_is_selected(tmp_path):
@@ -404,7 +412,7 @@ def test_lying_declared_env_reports_tree_version_with_reserve(tmp_path, capsys, 
         capsys, "--human", "--workspace", str(tmp_path), "doctor",
     )
     assert code == 0
-    assert "Evidence  : none (tree-only read)" in captured.out
+    assert "Evidence  : none observed (tree-only read)" in captured.out
     assert "Running   : 1.2.0" in captured.out
     assert "Source    :" in captured.out
     assert "[OK]" in captured.out
@@ -423,8 +431,8 @@ def test_real_declared_env_human_output_differs_from_fabricated(tmp_path, capsys
     monkeypatch.setattr("aef._version.__version__", "1.2.0")
     _, _, fake_out = invoke(capsys, "--human", "--workspace", str(other), "doctor")
 
-    assert "Evidence  : none (tree-only read)" in fake_out.out
-    assert "Evidence  : dist-info" in real_out.out
+    assert "Evidence  : none observed (tree-only read)" in fake_out.out
+    assert "Evidence  : dist-info-metadata-wheel" in real_out.out
     assert fake_out.out != real_out.out
 
 

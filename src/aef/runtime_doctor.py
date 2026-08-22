@@ -5,25 +5,29 @@ from __future__ import annotations
 import hashlib
 import shlex
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .runtime_confined_io import (
+    dependency_wheel_is_usable,
+    proposed_install_path_is_safe,
+    read_bytes_confined,
+    read_text_confined,
+    workspace_contains,
+)
 from .runtime_discovery import (
     DECISION_BLOCKED,
     DECISION_INSTALL_REQUIRED,
     DECISION_OK,
-    confined_workspace_read_path,
     discover_runtime,
     found_package_version,
     host_architecture,
     host_platform,
     interpreter_label,
     select_local_wheel,
-    workspace_contains,
 )
-from .upgrade_compat import MAX_FILE_BYTES, installed_package_version
+from .upgrade_compat import installed_package_version
 
 PYPI_INDEX_URL = "https://pypi.org/simple"
 JSONSCHEMA_WHEEL_PREFIX = "jsonschema-"
@@ -38,6 +42,7 @@ DOCTOR_RESULT_FIELDS = (
     "running_module_version",
     "declared_version_source",
     "declared_env_install_evidence",
+    "declared_env_mismatch",
     "workspace_compatible",
     "venv_status",
     "network_required",
@@ -72,32 +77,14 @@ def _workspace_initialized(workspace: Path) -> bool | None:
 
 
 def _hash_file(path: Path, workspace: Path) -> str | None:
-    if confined_workspace_read_path(workspace, path) is None:
+    payload = read_bytes_confined(workspace, path, site="local_wheel.sha256")
+    if payload is None:
         return None
-    try:
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            return None
-    except OSError:
-        return None
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _read_checksum_sidecar(path: Path, workspace: Path) -> str | None:
-    if confined_workspace_read_path(workspace, path) is None:
-        return None
-    try:
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            return None
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return text
+    return read_text_confined(workspace, path, site="checksum.sidecar")
 
 
 def _expected_hash(wheel: Path, workspace: Path) -> str | None:
@@ -123,8 +110,8 @@ def _expected_hash(wheel: Path, workspace: Path) -> str | None:
     return None
 
 
-def dependency_wheels_present(directory: Path) -> bool:
-    """Offline install needs a real ``jsonschema-*.whl`` wheel beside the AEF wheel."""
+def dependency_wheels_present(directory: Path, workspace: Path) -> bool:
+    """Offline install needs a confined jsonschema wheel with wheel metadata."""
     if not directory.is_dir():
         return False
     for item in directory.iterdir():
@@ -132,11 +119,8 @@ def dependency_wheels_present(directory: Path) -> bool:
             continue
         if not item.name.startswith(JSONSCHEMA_WHEEL_PREFIX):
             continue
-        if item.stat().st_size == 0:
-            continue
-        if not zipfile.is_zipfile(item):
-            continue
-        return True
+        if dependency_wheel_is_usable(workspace, item):
+            return True
     return False
 
 
@@ -266,18 +250,20 @@ def candidate_isolated_env_paths(workspace: Path, venv_status: str) -> list[Path
     return paths
 
 
-def resolve_proposed_env_path(workspace: Path, venv_status: str) -> Path:
-    """First free isolated-env path for a copyable install proposal."""
-    candidates = candidate_isolated_env_paths(workspace, venv_status)
-    for candidate in candidates:
-        if not candidate.exists():
-            return candidate
+def resolve_proposed_env_path(
+    workspace: Path,
+    venv_status: str,
+) -> tuple[Path | None, str | None]:
+    """Return a safe install target inside the workspace, or a blocked cause."""
+    candidates = list(candidate_isolated_env_paths(workspace, venv_status))
     suffix = host_platform()
     for index in range(2, 100):
-        extra = workspace / f".aef-venv-{suffix}-{index}"
-        if not extra.exists():
-            return extra
-    return workspace / f".aef-venv-{suffix}-new"
+        candidates.append(workspace / f".aef-venv-{suffix}-{index}")
+    candidates.append(workspace / f".aef-venv-{suffix}-new")
+    for candidate in candidates:
+        if proposed_install_path_is_safe(workspace, candidate):
+            return candidate, None
+    return None, "unsafe_install_target"
 
 
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
@@ -295,6 +281,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     running_module_version = found_package_version(imported=True)
     declared_source = discovered.get("declared_version_source")
     declared_evidence = discovered.get("declared_env_install_evidence")
+    declared_mismatch = discovered.get("declared_env_mismatch")
     declared_source_rel = None
     if isinstance(declared_source, Path):
         try:
@@ -311,6 +298,11 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             )
         elif declared_evidence is not None:
             observations.append("declared_env_install_evidence:none")
+    if declared_mismatch:
+        observations.append(
+            "declared_env_mismatch:"
+            f"{declared_mismatch['path']}={declared_mismatch['version']}",
+        )
     if artifact == "ambiguous":
         if decision == DECISION_OK:
             observations.append("ambiguous_local_wheels")
@@ -318,11 +310,11 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             decision = DECISION_BLOCKED
             blocked_cause = "ambiguous_local_wheels"
     initialized = _workspace_initialized(workspace)
-    env_path = str(resolve_proposed_env_path(workspace, discovered["venv_status"]).resolve())
+    env_path, install_issue = resolve_proposed_env_path(workspace, discovered["venv_status"])
     offline_ready = (
         artifact == "checksum_matched"
         and wheel is not None
-        and dependency_wheels_present(wheel.parent)
+        and dependency_wheels_present(wheel.parent, workspace)
     )
     offline_basis = "self_attested_checksum" if offline_ready else None
     if decision == DECISION_OK:
@@ -332,11 +324,20 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         network_required = False
         install_command = ""
     else:
-        if offline_ready:
+        if env_path is None:
+            decision = DECISION_BLOCKED
+            blocked_cause = install_issue or "unsafe_install_target"
+            network_required = False
+            install_command = ""
+        elif offline_ready:
             spec = resolve_package_install_spec(
                 expected_package_version=expected,
                 artifact="checksum_matched",
                 wheel=wheel,
+            )
+            network_required = False
+            install_command = proposed_install_command_from_spec(
+                spec, str(env_path.resolve()),
             )
         else:
             spec = resolve_package_install_spec(
@@ -344,8 +345,10 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
                 artifact="absent",
                 wheel=None,
             )
-        network_required = not offline_ready
-        install_command = proposed_install_command_from_spec(spec, env_path)
+            network_required = True
+            install_command = proposed_install_command_from_spec(
+                spec, str(env_path.resolve()),
+            )
     result = {
         "platform": host_platform(),
         "architecture": host_architecture(),
@@ -356,6 +359,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "running_module_version": running_module_version,
         "declared_version_source": declared_source_rel,
         "declared_env_install_evidence": declared_evidence if declared_evidence is not None else None,
+        "declared_env_mismatch": declared_mismatch,
         "workspace_compatible": initialized,
         "venv_status": discovered["venv_status"],
         "network_required": network_required,
@@ -368,6 +372,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             if blocked_cause in {
                 "invalid_expected_package_version",
                 "external_env",
+                "unsafe_install_target",
             }
             else (
                 ",".join(path.name for path in candidates)

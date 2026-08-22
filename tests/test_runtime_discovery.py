@@ -92,8 +92,8 @@ def test_inspect_venv_tree_never_spawns(monkeypatch, tmp_path, host, kind, expec
 
     monkeypatch.setattr(subprocess, "run", fail_run)
     monkeypatch.setattr(subprocess, "Popen", fail_run)
-    assert inspect_venv_tree(root) == expected
-    assert inspect_venv_tree(tmp_path / "missing") == "absent"
+    assert inspect_venv_tree(root, tmp_path) == expected
+    assert inspect_venv_tree(tmp_path / "missing", tmp_path) == "absent"
 
 
 def test_empty_venv_is_not_a_declared_runtime(tmp_path, monkeypatch):
@@ -168,7 +168,8 @@ def test_local_wheel_announces_offline_install(tmp_path):
     (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
     dep = tmp_path / "jsonschema-4.0.0-py3-none-any.whl"
     with zipfile.ZipFile(dep, "w") as archive:
-        archive.writestr("dummy.txt", "dep")
+        archive.writestr("jsonschema-4.0.0.dist-info/METADATA", "Name: jsonschema\n")
+        archive.writestr("jsonschema-4.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
     result = diagnose_runtime(
         tmp_path, can_import=lambda: False,
     )

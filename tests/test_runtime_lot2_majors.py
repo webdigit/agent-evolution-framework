@@ -123,7 +123,8 @@ def test_m5_offline_basis_requires_jsonschema_wheel(tmp_path):
 
     dep = tmp_path / "jsonschema-4.22.0-py3-none-any.whl"
     with zipfile.ZipFile(dep, "w") as archive:
-        archive.writestr("dummy.txt", "dep")
+        archive.writestr("jsonschema-4.22.0.dist-info/METADATA", "Name: jsonschema\n")
+        archive.writestr("jsonschema-4.22.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
     with_dep = diagnose_runtime(tmp_path, can_import=lambda: False)
     assert with_dep["network_required"] is False
     assert with_dep["offline_basis"] == "self_attested_checksum"

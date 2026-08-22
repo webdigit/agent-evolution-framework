@@ -186,6 +186,59 @@ def _escape_human_value(value: Any) -> str:
     return "".join(escaped)
 
 
+def _doctor_context_lines(result: dict[str, Any]) -> list[str]:
+    """Trust-qualifying doctor fields shared across PASS, INSTALL_REQUIRED, and BLOCKED."""
+    lines: list[str] = []
+    found = _escape_human_value(result.get("found_package_version") or "none")
+    expected = result.get("expected_package_version")
+    lines.append(f"Found     : {found}")
+    if expected is not None:
+        lines.append(f"Expected  : {_escape_human_value(expected)}")
+    running = result.get("running_module_version")
+    if running:
+        lines.append(f"Running   : {_escape_human_value(running)}")
+    lines.append(f"Venv      : {_escape_human_value(result.get('venv_status', 'unknown'))}")
+    lines.append(f"Method    : {_escape_human_value(result.get('discovery_method', 'none'))}")
+    declared_source = result.get("declared_version_source")
+    if declared_source:
+        lines.append(f"Source    : {_escape_human_value(declared_source)}")
+    mismatch = result.get("declared_env_mismatch")
+    if mismatch:
+        lines.append(
+            "Declared  : "
+            + _escape_human_value(mismatch.get("path", "?"))
+            + " ("
+            + _escape_human_value(mismatch.get("version", "?"))
+            + ", skipped)",
+        )
+    install_evidence = result.get("declared_env_install_evidence")
+    if install_evidence is not None and result.get("discovery_method") == "declared_env":
+        if install_evidence:
+            lines.append(
+                "Evidence  : "
+                + _escape_human_value(", ".join(str(item) for item in install_evidence)),
+            )
+        else:
+            lines.append("Evidence  : none observed (tree-only read)")
+    artifact = result.get("local_artifact")
+    if artifact and artifact not in {"absent", ""}:
+        lines.append(f"Artifact  : {_escape_human_value(artifact)}")
+    offline_basis = result.get("offline_basis")
+    if offline_basis:
+        lines.append(
+            f"Offline   : {_escape_human_value(offline_basis)} "
+            "(self-attested checksum from the workspace)",
+        )
+    init = result.get("workspace_compatible")
+    if init is True:
+        lines.append("Workspace init : yes")
+    elif init is False:
+        lines.append("Workspace init : no")
+    elif init is None:
+        lines.append("Workspace init : unknown (unreadable manifest)")
+    return lines
+
+
 def _display_workspace(envelope: dict[str, Any]) -> str:
     return str(Path(envelope["workspace"]))
 
@@ -566,45 +619,11 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 )
 
         if command == "DOCTOR":
-            decision = _escape_human_value(result.get("decision", status))
             platform_name = _escape_human_value(result.get("platform", "unknown"))
-            found = _escape_human_value(result.get("found_package_version") or "none")
-            expected = _escape_human_value(result.get("expected_package_version") or "none")
-            venv_status = _escape_human_value(result.get("venv_status", "unknown"))
-            method = _escape_human_value(result.get("discovery_method", "none"))
             if status == "PASS":
                 observations = result.get("observations") or []
-                local_artifact = result.get("local_artifact")
-                offline_basis = result.get("offline_basis")
-                running = result.get("running_module_version")
-                declared_source = result.get("declared_version_source")
-                install_evidence = result.get("declared_env_install_evidence")
-                lines = [
-                    "[OK] AEF runtime is ready\n",
-                    f"Platform  : {platform_name}",
-                    f"Method    : {method}",
-                    f"Found     : {found}",
-                    f"Venv      : {venv_status}",
-                ]
-                if declared_source:
-                    lines.append(f"Source    : {_escape_human_value(declared_source)}")
-                if running and method == "declared_env":
-                    lines.append(f"Running   : {_escape_human_value(running)}")
-                if method == "declared_env":
-                    if install_evidence:
-                        lines.append(
-                            "Evidence  : "
-                            + _escape_human_value(", ".join(str(item) for item in install_evidence)),
-                        )
-                    else:
-                        lines.append("Evidence  : none (tree-only read)")
-                if local_artifact and local_artifact not in {"absent", ""}:
-                    lines.append(f"Artifact  : {_escape_human_value(local_artifact)}")
-                if offline_basis:
-                    lines.append(
-                        f"Offline   : {_escape_human_value(offline_basis)} "
-                        "(self-attested checksum from the workspace)"
-                    )
+                lines = ["[OK] AEF runtime is ready\n", f"Platform  : {platform_name}"]
+                lines.extend(_doctor_context_lines(result))
                 if observations:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
@@ -613,25 +632,14 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return "\n".join(lines) + "\n"
             if status == "INSTALL_REQUIRED":
                 command_line = _escape_human_value(result.get("install_command") or "")
-                local_artifact = _escape_human_value(result.get("local_artifact") or "none")
                 network = "yes" if result.get("network_required") else "no"
-                offline_basis = result.get("offline_basis")
                 observations = result.get("observations") or []
                 lines = [
                     "[INSTALL_REQUIRED] No compatible AEF runtime\n",
-                    "",
                     f"Platform  : {platform_name}",
-                    f"Found     : {found}",
-                    f"Expected  : {expected}",
-                    f"Venv      : {venv_status}",
-                    f"Artifact  : {local_artifact}",
-                    f"Network   : {network}",
                 ]
-                if offline_basis:
-                    lines.append(
-                        f"Offline   : {_escape_human_value(offline_basis)} "
-                        "(self-attested checksum from the workspace)"
-                    )
+                lines.extend(_doctor_context_lines(result))
+                lines.append(f"Network   : {network}")
                 if observations:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
@@ -649,13 +657,18 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     or "unknown"
                 )
                 blocked_path = envelope["meta"].get("blocked_path") or result.get("blocked_path")
+                observations = result.get("observations") or []
                 lines = [
                     "[BLOCKED] AEF runtime diagnosis is blocked\n",
-                    "",
                     f"Cause     : {cause}",
                 ]
                 if blocked_path:
                     lines.append(f"Path      : {_escape_human_value(blocked_path)}")
+                lines.extend(_doctor_context_lines(result))
+                if observations:
+                    lines.append(
+                        f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
+                    )
                 lines.append(f"Workspace : {workspace}")
                 return "\n".join(lines) + "\n"
 

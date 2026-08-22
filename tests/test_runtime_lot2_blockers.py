@@ -142,7 +142,8 @@ def test_b1_cli_local_wheel_absolute_path_in_proposal(tmp_path, capsys):
     Path(str(wheel) + ".sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
     dep = tmp_path / "jsonschema-4.22.0-py3-none-any.whl"
     with zipfile.ZipFile(dep, "w") as archive:
-        archive.writestr("dummy.txt", "dep")
+        archive.writestr("jsonschema-4.22.0.dist-info/METADATA", "Name: jsonschema\n")
+        archive.writestr("jsonschema-4.22.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
 
     code, envelope, _ = invoke(
         capsys, "--json", "--workspace", str(tmp_path), "doctor",
