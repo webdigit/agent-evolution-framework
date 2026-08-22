@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -120,7 +121,9 @@ def test_m5_offline_basis_requires_jsonschema_wheel(tmp_path):
     assert "--index-url" in without_dep["install_command"]
     assert "--no-index" not in without_dep["install_command"]
 
-    (tmp_path / "jsonschema-4.22.0-py3-none-any.whl").write_bytes(b"dep")
+    dep = tmp_path / "jsonschema-4.22.0-py3-none-any.whl"
+    with zipfile.ZipFile(dep, "w") as archive:
+        archive.writestr("dummy.txt", "dep")
     with_dep = diagnose_runtime(tmp_path, can_import=lambda: False)
     assert with_dep["network_required"] is False
     assert with_dep["offline_basis"] == "self_attested_checksum"

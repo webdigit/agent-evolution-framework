@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -139,7 +140,9 @@ def test_b1_cli_local_wheel_absolute_path_in_proposal(tmp_path, capsys):
     wheel.write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
     Path(str(wheel) + ".sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
-    (tmp_path / "jsonschema-4.22.0-py3-none-any.whl").write_bytes(b"dep")
+    dep = tmp_path / "jsonschema-4.22.0-py3-none-any.whl"
+    with zipfile.ZipFile(dep, "w") as archive:
+        archive.writestr("dummy.txt", "dep")
 
     code, envelope, _ = invoke(
         capsys, "--json", "--workspace", str(tmp_path), "doctor",

@@ -5,16 +5,18 @@ from __future__ import annotations
 import hashlib
 import shlex
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .filesystem import is_link_or_reparse_point
 from .runtime_discovery import (
     DECISION_BLOCKED,
     DECISION_INSTALL_REQUIRED,
     DECISION_OK,
+    confined_workspace_read_path,
     discover_runtime,
+    found_package_version,
     host_architecture,
     host_platform,
     interpreter_label,
@@ -33,6 +35,9 @@ DOCTOR_RESULT_FIELDS = (
     "discovery_method",
     "found_package_version",
     "expected_package_version",
+    "running_module_version",
+    "declared_version_source",
+    "declared_env_install_evidence",
     "workspace_compatible",
     "venv_status",
     "network_required",
@@ -67,13 +72,9 @@ def _workspace_initialized(workspace: Path) -> bool | None:
 
 
 def _hash_file(path: Path, workspace: Path) -> str | None:
+    if confined_workspace_read_path(workspace, path) is None:
+        return None
     try:
-        if is_link_or_reparse_point(path):
-            if not workspace_contains(workspace, path):
-                return None
-            resolved = path.resolve()
-            if not workspace_contains(workspace, resolved):
-                return None
         size = path.stat().st_size
         if size > MAX_FILE_BYTES:
             return None
@@ -87,13 +88,9 @@ def _hash_file(path: Path, workspace: Path) -> str | None:
 
 
 def _read_checksum_sidecar(path: Path, workspace: Path) -> str | None:
+    if confined_workspace_read_path(workspace, path) is None:
+        return None
     try:
-        if is_link_or_reparse_point(path):
-            if not workspace_contains(workspace, path):
-                return None
-            resolved = path.resolve()
-            if not workspace_contains(workspace, resolved):
-                return None
         size = path.stat().st_size
         if size > MAX_FILE_BYTES:
             return None
@@ -127,11 +124,7 @@ def _expected_hash(wheel: Path, workspace: Path) -> str | None:
 
 
 def dependency_wheels_present(directory: Path) -> bool:
-    """Offline install needs a real ``jsonschema-*.whl`` wheel beside the AEF wheel.
-
-    A prefix match alone is not enough: ``jsonschema-specifications`` and empty
-    placeholder files must not justify ``network_required: false``.
-    """
+    """Offline install needs a real ``jsonschema-*.whl`` wheel beside the AEF wheel."""
     if not directory.is_dir():
         return False
     for item in directory.iterdir():
@@ -139,9 +132,9 @@ def dependency_wheels_present(directory: Path) -> bool:
             continue
         if not item.name.startswith(JSONSCHEMA_WHEEL_PREFIX):
             continue
-        if item.name.startswith("jsonschema-specifications-"):
-            continue
         if item.stat().st_size == 0:
+            continue
+        if not zipfile.is_zipfile(item):
             continue
         return True
     return False
@@ -279,9 +272,12 @@ def resolve_proposed_env_path(workspace: Path, venv_status: str) -> Path:
     for candidate in candidates:
         if not candidate.exists():
             return candidate
-    if len(candidates) > 1:
-        return candidates[1]
-    return candidates[0]
+    suffix = host_platform()
+    for index in range(2, 100):
+        extra = workspace / f".aef-venv-{suffix}-{index}"
+        if not extra.exists():
+            return extra
+    return workspace / f".aef-venv-{suffix}-new"
 
 
 def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
@@ -296,8 +292,25 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     )
     blocked_cause = discovered.get("blocked_cause")
     observations: list[str] = []
-    if discovered["discovery_method"] == "declared_env":
-        observations.append("declared_env_version_from_tree")
+    running_module_version = found_package_version(imported=True)
+    declared_source = discovered.get("declared_version_source")
+    declared_evidence = discovered.get("declared_env_install_evidence")
+    declared_source_rel = None
+    if isinstance(declared_source, Path):
+        try:
+            declared_source_rel = declared_source.relative_to(workspace).as_posix()
+        except ValueError:
+            declared_source_rel = declared_source.as_posix()
+    if discovered["discovery_method"] == "declared_env" and declared_source_rel:
+        observations.append(f"declared_env_version_source:{declared_source_rel}")
+        if running_module_version:
+            observations.append(f"running_module_version:{running_module_version}")
+        if declared_evidence:
+            observations.append(
+                "declared_env_install_evidence:" + ",".join(declared_evidence),
+            )
+        elif declared_evidence is not None:
+            observations.append("declared_env_install_evidence:none")
     if artifact == "ambiguous":
         if decision == DECISION_OK:
             observations.append("ambiguous_local_wheels")
@@ -340,6 +353,9 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "discovery_method": discovered["discovery_method"],
         "found_package_version": discovered["found_package_version"],
         "expected_package_version": expected,
+        "running_module_version": running_module_version,
+        "declared_version_source": declared_source_rel,
+        "declared_env_install_evidence": declared_evidence if declared_evidence is not None else None,
         "workspace_compatible": initialized,
         "venv_status": discovered["venv_status"],
         "network_required": network_required,
@@ -349,7 +365,10 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "blocked_cause": blocked_cause,
         "blocked_path": (
             discovered.get("blocked_path")
-            if blocked_cause == "invalid_expected_package_version"
+            if blocked_cause in {
+                "invalid_expected_package_version",
+                "external_env",
+            }
             else (
                 ",".join(path.name for path in candidates)
                 if blocked_cause == "ambiguous_local_wheels"

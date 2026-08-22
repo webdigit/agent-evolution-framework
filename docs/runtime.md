@@ -23,12 +23,19 @@ module.
 
 **What `found_package_version` means.** For `discovery_method: declared_env`,
 the version is read from the project venv tree (`site-packages/aef/_version.py`)
-without executing that interpreter. A hand-crafted `_version.py` in an
-otherwise empty `.aef-venv` is reported as declared — `doctor` does not verify
+without executing that interpreter. The envelope names the exact source path in
+`declared_version_source`, reports `running_module_version` from the current CLI
+process, and lists `declared_env_install_evidence` (for example `dist-info`,
+`record`, `console_script`) when those markers exist on disk. A hand-crafted tree
+without install markers is still reported as declared — `doctor` does not verify
 that `pip install` succeeded or that `import aef` would work inside that venv.
-The envelope records `observations: ["declared_env_version_from_tree"]` in that
-case. For `discovery_method: python_module`, the version is the package imported
-by the current CLI process.
+For `discovery_method: python_module`, the version is the package imported by the
+current CLI process.
+
+`workspace_compatible` is `true` when `.agent/manifest.json` is present and
+readable inside the workspace, `false` when initialization is absent, and `null`
+when the manifest cannot be classified safely (for example a link escapes the
+workspace).
 
 Automated installation from `doctor` is planned for a later release.
 Until then, when installation is required, `doctor` returns a **copyable command**

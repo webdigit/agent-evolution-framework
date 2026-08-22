@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -164,7 +166,9 @@ def test_local_wheel_announces_offline_install(tmp_path):
     import hashlib
     digest = hashlib.sha256(payload).hexdigest()
     (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
-    (tmp_path / "jsonschema-4.0.0-py3-none-any.whl").write_bytes(b"dep")
+    dep = tmp_path / "jsonschema-4.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(dep, "w") as archive:
+        archive.writestr("dummy.txt", "dep")
     result = diagnose_runtime(
         tmp_path, can_import=lambda: False,
     )
@@ -216,3 +220,4 @@ def test_external_env_is_blocked(tmp_path):
     assert discovered["external_env"] is True
     assert discovered["venv_status"] == "blocked"
     assert discovered["blocked_cause"] == "external_env"
+    assert discovered["blocked_path"] == ".venv"

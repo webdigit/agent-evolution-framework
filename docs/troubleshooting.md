@@ -26,7 +26,7 @@ Read `blocked_cause` and `blocked_path` in the JSON envelope, or the `Cause` /
 - `invalid_expected_package_version` — `.agent/runtime-requirements.json` is
   missing, malformed, or carries a non-PEP-440 version.
 - `external_env` — a declared virtual environment symlink escapes the
-  workspace.
+  workspace (`blocked_path` names the declared env entry).
 - `ambiguous_local_wheels` — multiple local wheels match and none can be chosen
   while installation is still required.
 

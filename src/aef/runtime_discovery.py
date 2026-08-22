@@ -137,15 +137,40 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
     return __version__
 
 
-def _read_bounded_utf8(path: Path, workspace: Path) -> str | None:
-    """Read up to MAX_FILE_BYTES; refuse links that escape the workspace."""
+def confined_workspace_read_path(workspace: Path, target: Path) -> Path | None:
+    """Reject reads whose path chain crosses a link/reparse point or escapes the workspace."""
     try:
-        if is_link_or_reparse_point(path):
-            if not workspace_contains(workspace, path):
+        root = workspace.resolve()
+        relative = target.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if not relative.parts or any(part in {"", ".."} for part in relative.parts):
+        return None
+    cursor = root
+    for part in relative.parts:
+        cursor = cursor / part
+        if is_link_or_reparse_point(cursor):
+            try:
+                resolved_link = cursor.resolve()
+            except OSError:
                 return None
-            resolved = path.resolve()
-            if not workspace_contains(workspace, resolved):
+            if not workspace_contains(root, resolved_link):
                 return None
+            return None
+    try:
+        final = target.resolve()
+    except OSError:
+        return None
+    if not workspace_contains(root, final):
+        return None
+    return final
+
+
+def _read_bounded_utf8(path: Path, workspace: Path) -> str | None:
+    """Read up to MAX_FILE_BYTES; refuse paths that escape the workspace."""
+    if confined_workspace_read_path(workspace, path) is None:
+        return None
+    try:
         size = path.stat().st_size
         if size > MAX_FILE_BYTES:
             return None
@@ -184,7 +209,7 @@ def _aef_package_roots(venv: Path) -> list[Path]:
     roots = [venv / "Lib" / "site-packages" / "aef"]
     lib = venv / "lib"
     if lib.is_dir():
-        for child in lib.iterdir():
+        for child in sorted(lib.iterdir(), key=lambda item: item.name):
             if child.name.startswith("python"):
                 roots.append(child / "site-packages" / "aef")
     return roots
@@ -198,7 +223,7 @@ def venv_has_aef_package(venv: Path) -> bool:
     return False
 
 
-def read_aef_version_from_tree(venv: Path, workspace: Path) -> str | None:
+def read_aef_version_from_tree(venv: Path, workspace: Path) -> tuple[str, Path] | None:
     for root in _aef_package_roots(venv):
         version_file = root / "_version.py"
         if not version_file.is_file():
@@ -207,8 +232,46 @@ def read_aef_version_from_tree(venv: Path, workspace: Path) -> str | None:
         if text is None:
             continue
         match = VERSION_PATTERN.search(text)
-        if match:
-            return match.group(1)
+        if not match:
+            continue
+        version = match.group(1)
+        if not is_pep440_version_token(version):
+            continue
+        return version, version_file
+    return None
+
+
+def declared_env_install_evidence(venv: Path, pkg_root: Path) -> list[str]:
+    """Observable on-disk hints that a declared env was installed, not hand-crafted."""
+    evidence: list[str] = []
+    site_packages = pkg_root.parent
+    if site_packages.is_dir():
+        for item in sorted(site_packages.iterdir(), key=lambda path: path.name):
+            if not item.is_dir() or not item.name.endswith(".dist-info"):
+                continue
+            base = item.name[: -len(".dist-info")]
+            if base not in {"aef",} and not base.startswith("agent_evolution_framework"):
+                continue
+            evidence.append("dist-info")
+            if (item / "RECORD").is_file():
+                evidence.append("record")
+            break
+    if host_platform() == "windows":
+        console = venv / "Scripts" / "aef.exe"
+    else:
+        console = venv / "bin" / "aef"
+    if console.is_file():
+        evidence.append("console_script")
+    return evidence
+
+
+def external_declared_env_path(workspace: Path) -> str | None:
+    for candidate in find_declared_envs(workspace):
+        if not workspace_contains(workspace, candidate):
+            try:
+                return candidate.relative_to(workspace.resolve()).as_posix()
+            except ValueError:
+                return candidate.name
     return None
 
 
@@ -325,25 +388,35 @@ def discover_runtime(
 ) -> dict[str, Any]:
     """Deterministic discovery. Never executes a PATH or foreign-venv binary.
 
-    When a declared project environment carries a readable AEF version, it wins
-    over the running interpreter (``python_module``). The CLI process always
-    imports ``aef``; ``declared_env`` answers which runtime the workspace uses.
+    When a declared project environment carries a readable AEF version that
+    satisfies ``expected_package_version``, it wins over the running
+    interpreter (``python_module``). Otherwise discovery falls back to the
+    current module rather than reporting a stale declared env.
     """
     imported = (can_import or module_importable)()
     venv_status = summarize_venv_status(workspace)
+    expected_info = read_expected_package_version(workspace)
+    expected = expected_info["value"] if expected_info["status"] == "valid" else None
     declared_version = None
-    declared_ready = False
+    declared_version_source: Path | None = None
+    declared_env_root: Path | None = None
     if venv_status == "compatible":
         for candidate in find_declared_envs(workspace):
             if inspect_venv_tree(candidate) != "compatible":
                 continue
             if not venv_has_aef_package(candidate):
                 continue
-            declared_version = read_aef_version_from_tree(candidate, workspace)
-            if declared_version is not None:
-                declared_ready = True
-                break
-    if declared_ready:
+            tree_read = read_aef_version_from_tree(candidate, workspace)
+            if tree_read is None:
+                continue
+            version, version_source = tree_read
+            if expected is not None and version != expected:
+                continue
+            declared_version = version
+            declared_version_source = version_source
+            declared_env_root = candidate
+            break
+    if declared_version is not None:
         method = "declared_env"
         version = declared_version
     elif imported:
@@ -352,7 +425,6 @@ def discover_runtime(
     else:
         method = "none"
         version = None
-    expected_info = read_expected_package_version(workspace)
     if expected_info["status"] == "invalid":
         return {
             "discovery_method": method,
@@ -363,20 +435,29 @@ def discover_runtime(
             "external_env": venv_status == "blocked",
             "blocked_cause": "invalid_expected_package_version",
             "blocked_path": expected_info["path"],
+            "declared_version_source": None,
+            "declared_env_root": None,
+            "declared_env_install_evidence": None,
             "decision": DECISION_BLOCKED,
         }
-    expected = expected_info["value"]
     version_ok = version is not None and (expected is None or version == expected)
     usable = method != "none" and version_ok and venv_status != "blocked"
     if venv_status == "blocked":
         decision = DECISION_BLOCKED
         blocked_cause = "external_env"
+        blocked_path = external_declared_env_path(workspace)
     elif usable:
         decision = DECISION_OK
         blocked_cause = None
+        blocked_path = None
     else:
         decision = DECISION_INSTALL_REQUIRED
         blocked_cause = None
+        blocked_path = None
+    install_evidence = None
+    if declared_env_root is not None and declared_version_source is not None:
+        pkg_root = declared_version_source.parent
+        install_evidence = declared_env_install_evidence(declared_env_root, pkg_root)
     return {
         "discovery_method": method,
         "found_package_version": version,
@@ -385,6 +466,13 @@ def discover_runtime(
         "venv_status": venv_status,
         "external_env": venv_status == "blocked",
         "blocked_cause": blocked_cause,
-        "blocked_path": expected_info["path"] if blocked_cause == "invalid_expected_package_version" else None,
+        "blocked_path": (
+            expected_info["path"]
+            if blocked_cause == "invalid_expected_package_version"
+            else blocked_path
+        ),
+        "declared_version_source": declared_version_source,
+        "declared_env_root": declared_env_root,
+        "declared_env_install_evidence": install_evidence,
         "decision": decision,
     }

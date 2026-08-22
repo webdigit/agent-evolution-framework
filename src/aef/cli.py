@@ -235,8 +235,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
             "RECORD": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "UPGRADE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "DOCTOR": {
-                "PASS", "CHANGE", "NO_CHANGE", "INSTALL_REQUIRED",
-                "BLOCKED", "FAILED", "ERROR",
+                "PASS", "INSTALL_REQUIRED", "BLOCKED", "FAILED", "ERROR",
             },
             "INGEST": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "COMPETENCY_DECLARE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
@@ -573,19 +572,39 @@ def _render_human(envelope: dict[str, Any]) -> str:
             expected = _escape_human_value(result.get("expected_package_version") or "none")
             venv_status = _escape_human_value(result.get("venv_status", "unknown"))
             method = _escape_human_value(result.get("discovery_method", "none"))
-            if status == "PASS" or (status == "NO_CHANGE" and decision == "OK"):
+            if status == "PASS":
                 observations = result.get("observations") or []
                 local_artifact = result.get("local_artifact")
+                offline_basis = result.get("offline_basis")
+                running = result.get("running_module_version")
+                declared_source = result.get("declared_version_source")
+                install_evidence = result.get("declared_env_install_evidence")
                 lines = [
                     "[OK] AEF runtime is ready\n",
-                    "",
                     f"Platform  : {platform_name}",
                     f"Method    : {method}",
                     f"Found     : {found}",
                     f"Venv      : {venv_status}",
                 ]
+                if declared_source:
+                    lines.append(f"Source    : {_escape_human_value(declared_source)}")
+                if running and method == "declared_env":
+                    lines.append(f"Running   : {_escape_human_value(running)}")
+                if method == "declared_env":
+                    if install_evidence:
+                        lines.append(
+                            "Evidence  : "
+                            + _escape_human_value(", ".join(str(item) for item in install_evidence)),
+                        )
+                    else:
+                        lines.append("Evidence  : none (tree-only read)")
                 if local_artifact and local_artifact not in {"absent", ""}:
                     lines.append(f"Artifact  : {_escape_human_value(local_artifact)}")
+                if offline_basis:
+                    lines.append(
+                        f"Offline   : {_escape_human_value(offline_basis)} "
+                        "(self-attested checksum from the workspace)"
+                    )
                 if observations:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
