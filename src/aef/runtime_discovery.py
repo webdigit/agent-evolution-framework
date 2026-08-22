@@ -12,12 +12,11 @@ from typing import Any, Callable
 from ._version import __version__
 from .filesystem import is_link_or_reparse_point
 from .runtime_confined_io import (
-    RUNTIME_READ_SITES,
-    confined_workspace_read_path,
+    confined_file_size,
     read_text_confined,
     workspace_contains,
 )
-from .upgrade_compat import MAX_FILE_BYTES
+from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
 
 DECISION_OK = "OK"
 DECISION_INSTALL_REQUIRED = "INSTALL_REQUIRED"
@@ -146,12 +145,6 @@ def found_package_version(*, imported: bool | None = None) -> str | None:
     return __version__
 
 
-def confined_workspace_read_path(workspace: Path, target: Path) -> Path | None:
-    from .runtime_confined_io import confined_workspace_read_path as _confined
-
-    return _confined(workspace, target)
-
-
 def _read_bounded_utf8(path: Path, workspace: Path, *, site: str) -> str | None:
     return read_text_confined(workspace, path, site=site)
 
@@ -166,8 +159,8 @@ def read_expected_package_version(workspace: Path) -> dict[str, Any]:
     if text is None:
         return {"status": "invalid", "value": None, "path": rel}
     try:
-        payload = json.loads(text)
-    except (json.JSONDecodeError, UnicodeError):
+        payload = json.loads(text, object_pairs_hook=reject_duplicate_keys)
+    except (json.JSONDecodeError, UnicodeError, DuplicateJSONKeyError):
         return {"status": "invalid", "value": None, "path": rel}
     if not isinstance(payload, dict):
         return {"status": "invalid", "value": None, "path": rel}
@@ -224,8 +217,6 @@ def declared_env_install_evidence(
     workspace: Path,
 ) -> list[str]:
     """Observable, content-checked hints — names alone are not enough."""
-    from .runtime_confined_io import read_text_confined
-
     evidence: list[str] = []
     site_packages = pkg_root.parent
     if site_packages.is_dir():
@@ -239,9 +230,17 @@ def declared_env_install_evidence(
             wheel_file = item / "WHEEL"
             if not metadata.is_file() or not wheel_file.is_file():
                 continue
-            if read_text_confined(workspace, metadata, site="declared_env.version_file") is None:
+            metadata_text = read_text_confined(
+                workspace, metadata, site="declared_env.version_file",
+            )
+            wheel_text = read_text_confined(
+                workspace, wheel_file, site="declared_env.version_file",
+            )
+            if metadata_text is None or wheel_text is None:
                 continue
-            if read_text_confined(workspace, wheel_file, site="declared_env.version_file") is None:
+            if not metadata_text.strip() or not wheel_text.strip():
+                continue
+            if "Name:" not in metadata_text or "Wheel-Version:" not in wheel_text:
                 continue
             evidence.append("dist-info-metadata-wheel")
             record = item / "RECORD"
@@ -256,12 +255,9 @@ def declared_env_install_evidence(
         console = venv / "Scripts" / "aef.exe"
     else:
         console = venv / "bin" / "aef"
-    if console.is_file():
-        try:
-            if console.stat().st_size > 0:
-                evidence.append("console_script-nonempty")
-        except OSError:
-            pass
+    size = confined_file_size(workspace, console, site="declared_env.console_script")
+    if size is not None and size > 0:
+        evidence.append("console_script-nonempty")
     return evidence
 
 
@@ -269,9 +265,14 @@ def external_declared_env_path(workspace: Path) -> str | None:
     for candidate in find_declared_envs(workspace):
         if not workspace_contains(workspace, candidate):
             try:
-                return candidate.relative_to(workspace.resolve()).as_posix()
+                rel = candidate.relative_to(workspace.resolve()).as_posix()
             except ValueError:
-                return candidate.name
+                rel = candidate.name
+            try:
+                target = candidate.resolve().as_posix()
+            except OSError:
+                target = "unresolved"
+            return f"{rel} -> {target}"
     return None
 
 
@@ -423,6 +424,12 @@ def discover_runtime(
         method = "none"
         version = None
     if expected_info["status"] == "invalid":
+        install_evidence = None
+        if declared_env_root is not None and declared_version_source is not None:
+            pkg_root = declared_version_source.parent
+            install_evidence = declared_env_install_evidence(
+                declared_env_root, pkg_root, workspace,
+            )
         return {
             "discovery_method": method,
             "found_package_version": version,
@@ -432,10 +439,10 @@ def discover_runtime(
             "external_env": venv_status == "blocked",
             "blocked_cause": "invalid_expected_package_version",
             "blocked_path": expected_info["path"],
-            "declared_version_source": None,
-            "declared_env_root": None,
-            "declared_env_install_evidence": None,
-            "declared_env_mismatch": None,
+            "declared_version_source": declared_version_source,
+            "declared_env_root": declared_env_root,
+            "declared_env_install_evidence": install_evidence,
+            "declared_env_mismatch": declared_env_mismatch,
             "decision": DECISION_BLOCKED,
         }
     version_ok = version is not None and (expected is None or version == expected)

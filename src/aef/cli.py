@@ -189,6 +189,9 @@ def _escape_human_value(value: Any) -> str:
 def _doctor_context_lines(result: dict[str, Any]) -> list[str]:
     """Trust-qualifying doctor fields shared across PASS, INSTALL_REQUIRED, and BLOCKED."""
     lines: list[str] = []
+    lines.append(f"Platform  : {_escape_human_value(result.get('platform', 'unknown'))}")
+    lines.append(f"Arch      : {_escape_human_value(result.get('architecture', 'unknown'))}")
+    lines.append(f"Interpreter : {_escape_human_value(result.get('interpreter', 'unknown'))}")
     found = _escape_human_value(result.get("found_package_version") or "none")
     expected = result.get("expected_package_version")
     lines.append(f"Found     : {found}")
@@ -236,6 +239,11 @@ def _doctor_context_lines(result: dict[str, Any]) -> list[str]:
         lines.append("Workspace init : no")
     elif init is None:
         lines.append("Workspace init : unknown (unreadable manifest)")
+    network = result.get("network_required")
+    if network is True:
+        lines.append("Network   : yes")
+    elif network is False:
+        lines.append("Network   : no")
     return lines
 
 
@@ -619,10 +627,9 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 )
 
         if command == "DOCTOR":
-            platform_name = _escape_human_value(result.get("platform", "unknown"))
             if status == "PASS":
                 observations = result.get("observations") or []
-                lines = ["[OK] AEF runtime is ready\n", f"Platform  : {platform_name}"]
+                lines = ["[OK] AEF runtime is ready\n"]
                 lines.extend(_doctor_context_lines(result))
                 if observations:
                     lines.append(
@@ -632,14 +639,11 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return "\n".join(lines) + "\n"
             if status == "INSTALL_REQUIRED":
                 command_line = _escape_human_value(result.get("install_command") or "")
-                network = "yes" if result.get("network_required") else "no"
                 observations = result.get("observations") or []
                 lines = [
                     "[INSTALL_REQUIRED] No compatible AEF runtime\n",
-                    f"Platform  : {platform_name}",
                 ]
                 lines.extend(_doctor_context_lines(result))
-                lines.append(f"Network   : {network}")
                 if observations:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"

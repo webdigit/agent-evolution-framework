@@ -470,6 +470,42 @@ def test_doctor_has_no_install_flags(capsys):
     assert "manually" in output.lower() or "read-only" in output.lower()
 
 
+def test_empty_dist_info_files_do_not_count_as_install_evidence(tmp_path):
+    env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
+    pkg = _pkg_root(env)
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
+    dist = pkg.parent / "agent_evolution_framework-1.2.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "METADATA").write_bytes(b"")
+    (dist / "WHEEL").write_bytes(b"")
+    result = diagnose_runtime(tmp_path, can_import=lambda: False)
+    assert result["declared_env_install_evidence"] == []
+
+
+def test_duplicate_expected_version_keys_are_invalid(tmp_path):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        '{"expected_package_version":"1.2.0","expected_package_version":"9.9.9"}',
+        encoding="utf-8",
+    )
+    info = read_expected_package_version(tmp_path)
+    assert info["status"] == "invalid"
+
+
+def test_invalid_expected_preserves_declared_provenance(tmp_path, capsys):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text("{not-json", encoding="utf-8")
+    env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
+    _write_declared_aef(env, "9.9.9")
+    _, _, captured = invoke(capsys, "--human", "--workspace", str(tmp_path), "doctor")
+    assert "invalid_expected_package_version" in captured.out
+    assert "Method    : declared_env" in captured.out
+    assert "Source    :" in captured.out
+
+
 def test_invalid_expected_version_still_blocked(tmp_path):
     agent = tmp_path / ".agent"
     agent.mkdir()

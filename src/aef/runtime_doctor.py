@@ -145,7 +145,7 @@ def classify_local_artifact(
         return "available_unverified", wheel, [wheel]
     actual = _hash_file(wheel, workspace)
     if actual is None:
-        return "absent", None, [wheel]
+        return "available_unverified", wheel, [wheel]
     if actual == expected:
         return "checksum_matched", wheel, [wheel]
     return "hash_mismatch", wheel, [wheel]

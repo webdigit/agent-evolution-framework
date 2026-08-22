@@ -93,14 +93,16 @@ def test_m3_unreadable_expected_version_is_blocked(tmp_path, monkeypatch):
         json.dumps({"expected_package_version": "1.2.0"}),
         encoding="utf-8",
     )
-    original = Path.read_text
+    import aef.runtime_confined_io as confined_io
 
-    def boom(self, *args, **kwargs):
-        if self == requirements:
-            raise OSError("permission denied")
-        return original(self, *args, **kwargs)
+    original = confined_io.open_confined_read_fd
 
-    monkeypatch.setattr(Path, "read_text", boom)
+    def deny_requirements(workspace, target):
+        if target.name == "runtime-requirements.json":
+            return None
+        return original(workspace, target)
+
+    monkeypatch.setattr(confined_io, "open_confined_read_fd", deny_requirements)
     info = read_expected_package_version(tmp_path)
     assert info["status"] == "invalid"
     diagnosis = diagnose_runtime(tmp_path, can_import=lambda: True)

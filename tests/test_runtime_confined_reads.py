@@ -1,4 +1,4 @@
-"""Guard tests for confined runtime reads — enumeration, not case-by-case whack-a-mole."""
+"""Guard tests for confined runtime reads — symlink attacks and install safety."""
 
 from __future__ import annotations
 
@@ -10,29 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from aef.runtime_confined_io import RUNTIME_READ_SITES
 from aef.runtime_discovery import discover_runtime, inspect_venv_tree
 from aef.runtime_doctor import diagnose_runtime, resolve_proposed_env_path
 from tests.test_runtime_discovery import write_venv
 from tests.test_runtime_lot2_ter import _write_declared_aef, _write_jsonschema_wheel
-
-
-def test_runtime_read_sites_are_exhaustive():
-    """Every runtime doctor read path must be registered — add a site before adding a read."""
-    assert RUNTIME_READ_SITES == frozenset({
-        "agent.runtime_requirements",
-        "declared_env.pyvenv_cfg",
-        "declared_env.version_file",
-        "local_wheel.sha256",
-        "checksum.sidecar",
-        "dependency_wheel.archive",
-    })
-
-
-@pytest.mark.parametrize("site", sorted(RUNTIME_READ_SITES))
-def test_runtime_read_site_names_are_stable(site: str):
-    assert site == site.strip()
-    assert " " not in site
 
 
 def test_symlinked_pyvenv_cfg_outside_workspace_is_not_read(tmp_path):

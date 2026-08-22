@@ -221,4 +221,4 @@ def test_external_env_is_blocked(tmp_path):
     assert discovered["external_env"] is True
     assert discovered["venv_status"] == "blocked"
     assert discovered["blocked_cause"] == "external_env"
-    assert discovered["blocked_path"] == ".venv"
+    assert discovered["blocked_path"].startswith(".venv ->")
