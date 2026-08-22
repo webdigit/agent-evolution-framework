@@ -307,7 +307,8 @@ def test_namespace_package_declared_env_is_discovered(tmp_path):
     assert result["discovery_method"] == "declared_env"
     assert result["found_package_version"] == "1.2.0"
     assert result["decision"] == "OK"
-    assert result["declared_env_install_evidence"]
+    assert result["declared_env_root"] == ".aef-venv"
+    assert "declared_env_tree_read:unverified" in result["observations"]
 
 
 def test_stale_declared_env_skipped_for_satisfying_candidate(tmp_path):
@@ -405,20 +406,19 @@ def test_lying_declared_env_reports_tree_version_with_reserve(tmp_path, capsys, 
     assert result["found_package_version"] == "9.9.9"
     assert result["running_module_version"] == "1.2.0"
     assert result["declared_version_source"]
-    assert result["declared_env_install_evidence"] == []
-    assert "declared_env_install_evidence:none" in result["observations"]
+    assert "declared_env_tree_read:unverified" in result["observations"]
 
     code, _, captured = invoke(
         capsys, "--human", "--workspace", str(tmp_path), "doctor",
     )
     assert code == 0
-    assert "Evidence  : none observed (tree-only read)" in captured.out
+    assert "Trust     : tree read only (pip install not verified)" in captured.out
     assert "Running   : 1.2.0" in captured.out
     assert "Source    :" in captured.out
     assert "[OK]" in captured.out
 
 
-def test_real_declared_env_human_output_differs_from_fabricated(tmp_path, capsys, monkeypatch):
+def test_declared_env_shows_honest_trust_disclaimer(tmp_path, capsys, monkeypatch):
     env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
     pkg = _write_declared_aef(env, "1.2.0")
     _write_real_install_markers(env, pkg)
@@ -431,9 +431,10 @@ def test_real_declared_env_human_output_differs_from_fabricated(tmp_path, capsys
     monkeypatch.setattr("aef._version.__version__", "1.2.0")
     _, _, fake_out = invoke(capsys, "--human", "--workspace", str(other), "doctor")
 
-    assert "Evidence  : none observed (tree-only read)" in fake_out.out
-    assert "Evidence  : dist-info-metadata-wheel" in real_out.out
-    assert fake_out.out != real_out.out
+    assert "Trust     : tree read only (pip install not verified)" in real_out.out
+    assert "Trust     : tree read only (pip install not verified)" in fake_out.out
+    assert "Found     : 1.2.0" in real_out.out
+    assert "Found     : 9.9.9" in fake_out.out
 
 
 def test_pass_human_shows_offline_basis_when_present(tmp_path, capsys, monkeypatch):
@@ -468,19 +469,6 @@ def test_doctor_has_no_install_flags(capsys):
     assert "--install" not in output
     assert "--reuse-env" not in output
     assert "manually" in output.lower() or "read-only" in output.lower()
-
-
-def test_empty_dist_info_files_do_not_count_as_install_evidence(tmp_path):
-    env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
-    pkg = _pkg_root(env)
-    pkg.mkdir(parents=True, exist_ok=True)
-    (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
-    dist = pkg.parent / "agent_evolution_framework-1.2.0.dist-info"
-    dist.mkdir(parents=True)
-    (dist / "METADATA").write_bytes(b"")
-    (dist / "WHEEL").write_bytes(b"")
-    result = diagnose_runtime(tmp_path, can_import=lambda: False)
-    assert result["declared_env_install_evidence"] == []
 
 
 def test_duplicate_expected_version_keys_are_invalid(tmp_path):

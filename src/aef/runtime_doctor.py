@@ -18,7 +18,6 @@ from .runtime_confined_io import (
 )
 from .runtime_discovery import (
     DECISION_BLOCKED,
-    DECISION_INSTALL_REQUIRED,
     DECISION_OK,
     discover_runtime,
     found_package_version,
@@ -41,7 +40,7 @@ DOCTOR_RESULT_FIELDS = (
     "expected_package_version",
     "running_module_version",
     "declared_version_source",
-    "declared_env_install_evidence",
+    "declared_env_root",
     "declared_env_mismatch",
     "workspace_compatible",
     "venv_status",
@@ -280,8 +279,8 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
     observations: list[str] = []
     running_module_version = found_package_version(imported=True)
     declared_source = discovered.get("declared_version_source")
-    declared_evidence = discovered.get("declared_env_install_evidence")
     declared_mismatch = discovered.get("declared_env_mismatch")
+    declared_env_root = discovered.get("declared_env_root")
     declared_source_rel = None
     if isinstance(declared_source, Path):
         try:
@@ -292,12 +291,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         observations.append(f"declared_env_version_source:{declared_source_rel}")
         if running_module_version:
             observations.append(f"running_module_version:{running_module_version}")
-        if declared_evidence:
-            observations.append(
-                "declared_env_install_evidence:" + ",".join(declared_evidence),
-            )
-        elif declared_evidence is not None:
-            observations.append("declared_env_install_evidence:none")
+        observations.append("declared_env_tree_read:unverified")
     if declared_mismatch:
         observations.append(
             "declared_env_mismatch:"
@@ -358,7 +352,7 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "expected_package_version": expected,
         "running_module_version": running_module_version,
         "declared_version_source": declared_source_rel,
-        "declared_env_install_evidence": declared_evidence if declared_evidence is not None else None,
+        "declared_env_root": declared_env_root,
         "declared_env_mismatch": declared_mismatch,
         "workspace_compatible": initialized,
         "venv_status": discovered["venv_status"],

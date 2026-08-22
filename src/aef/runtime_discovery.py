@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ._version import __version__
-from .filesystem import is_link_or_reparse_point
 from .runtime_confined_io import (
-    confined_file_size,
     read_text_confined,
     workspace_contains,
 )
@@ -211,56 +209,6 @@ def read_aef_version_from_tree(venv: Path, workspace: Path) -> tuple[str, Path] 
     return None
 
 
-def declared_env_install_evidence(
-    venv: Path,
-    pkg_root: Path,
-    workspace: Path,
-) -> list[str]:
-    """Observable, content-checked hints — names alone are not enough."""
-    evidence: list[str] = []
-    site_packages = pkg_root.parent
-    if site_packages.is_dir():
-        for item in sorted(site_packages.iterdir(), key=lambda path: path.name):
-            if not item.is_dir() or not item.name.endswith(".dist-info"):
-                continue
-            base = item.name[: -len(".dist-info")]
-            if base not in {"aef",} and not base.startswith("agent_evolution_framework"):
-                continue
-            metadata = item / "METADATA"
-            wheel_file = item / "WHEEL"
-            if not metadata.is_file() or not wheel_file.is_file():
-                continue
-            metadata_text = read_text_confined(
-                workspace, metadata, site="declared_env.version_file",
-            )
-            wheel_text = read_text_confined(
-                workspace, wheel_file, site="declared_env.version_file",
-            )
-            if metadata_text is None or wheel_text is None:
-                continue
-            if not metadata_text.strip() or not wheel_text.strip():
-                continue
-            if "Name:" not in metadata_text or "Wheel-Version:" not in wheel_text:
-                continue
-            evidence.append("dist-info-metadata-wheel")
-            record = item / "RECORD"
-            if record.is_file():
-                record_text = read_text_confined(
-                    workspace, record, site="declared_env.version_file",
-                )
-                if record_text and record_text.strip():
-                    evidence.append("record-nonempty")
-            break
-    if host_platform() == "windows":
-        console = venv / "Scripts" / "aef.exe"
-    else:
-        console = venv / "bin" / "aef"
-    size = confined_file_size(workspace, console, site="declared_env.console_script")
-    if size is not None and size > 0:
-        evidence.append("console_script-nonempty")
-    return evidence
-
-
 def external_declared_env_path(workspace: Path) -> str | None:
     for candidate in find_declared_envs(workspace):
         if not workspace_contains(workspace, candidate):
@@ -424,12 +372,12 @@ def discover_runtime(
         method = "none"
         version = None
     if expected_info["status"] == "invalid":
-        install_evidence = None
-        if declared_env_root is not None and declared_version_source is not None:
-            pkg_root = declared_version_source.parent
-            install_evidence = declared_env_install_evidence(
-                declared_env_root, pkg_root, workspace,
-            )
+        declared_env_root_rel = None
+        if declared_env_root is not None:
+            try:
+                declared_env_root_rel = declared_env_root.relative_to(workspace.resolve()).as_posix()
+            except ValueError:
+                declared_env_root_rel = declared_env_root.as_posix()
         return {
             "discovery_method": method,
             "found_package_version": version,
@@ -440,8 +388,7 @@ def discover_runtime(
             "blocked_cause": "invalid_expected_package_version",
             "blocked_path": expected_info["path"],
             "declared_version_source": declared_version_source,
-            "declared_env_root": declared_env_root,
-            "declared_env_install_evidence": install_evidence,
+            "declared_env_root": declared_env_root_rel,
             "declared_env_mismatch": declared_env_mismatch,
             "decision": DECISION_BLOCKED,
         }
@@ -459,12 +406,12 @@ def discover_runtime(
         decision = DECISION_INSTALL_REQUIRED
         blocked_cause = None
         blocked_path = None
-    install_evidence = None
-    if declared_env_root is not None and declared_version_source is not None:
-        pkg_root = declared_version_source.parent
-        install_evidence = declared_env_install_evidence(
-            declared_env_root, pkg_root, workspace,
-        )
+    declared_env_root_rel = None
+    if declared_env_root is not None:
+        try:
+            declared_env_root_rel = declared_env_root.relative_to(workspace.resolve()).as_posix()
+        except ValueError:
+            declared_env_root_rel = declared_env_root.as_posix()
     return {
         "discovery_method": method,
         "found_package_version": version,
@@ -479,8 +426,7 @@ def discover_runtime(
             else blocked_path
         ),
         "declared_version_source": declared_version_source,
-        "declared_env_root": declared_env_root,
-        "declared_env_install_evidence": install_evidence,
+        "declared_env_root": declared_env_root_rel,
         "declared_env_mismatch": declared_env_mismatch,
         "decision": decision,
     }

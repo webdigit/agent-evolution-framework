@@ -205,6 +205,8 @@ def _doctor_context_lines(result: dict[str, Any]) -> list[str]:
     declared_source = result.get("declared_version_source")
     if declared_source:
         lines.append(f"Source    : {_escape_human_value(declared_source)}")
+    if result.get("discovery_method") == "declared_env":
+        lines.append("Trust     : tree read only (pip install not verified)")
     mismatch = result.get("declared_env_mismatch")
     if mismatch:
         lines.append(
@@ -214,15 +216,6 @@ def _doctor_context_lines(result: dict[str, Any]) -> list[str]:
             + _escape_human_value(mismatch.get("version", "?"))
             + ", skipped)",
         )
-    install_evidence = result.get("declared_env_install_evidence")
-    if install_evidence is not None and result.get("discovery_method") == "declared_env":
-        if install_evidence:
-            lines.append(
-                "Evidence  : "
-                + _escape_human_value(", ".join(str(item) for item in install_evidence)),
-            )
-        else:
-            lines.append("Evidence  : none observed (tree-only read)")
     artifact = result.get("local_artifact")
     if artifact and artifact not in {"absent", ""}:
         lines.append(f"Artifact  : {_escape_human_value(artifact)}")

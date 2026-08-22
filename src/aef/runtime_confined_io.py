@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -21,11 +22,13 @@ RUNTIME_READ_SITES: frozenset[str] = frozenset({
     "dependency_wheel.archive",
 })
 
-# Modules scanned by tests/test_runtime_read_coverage.py — no direct Path reads allowed.
+# Modules scanned by tests/test_runtime_read_coverage.py — advisory syntax guard (see docs).
 RUNTIME_READ_GUARD_MODULES = (
     "runtime_discovery.py",
     "runtime_doctor.py",
 )
+
+MAX_ZIP_MEMBER_BYTES = MAX_FILE_BYTES
 
 
 def workspace_contains(workspace: Path, target: Path) -> bool:
@@ -66,12 +69,22 @@ def confined_workspace_read_path(workspace: Path, target: Path) -> Path | None:
     return final
 
 
+def _is_regular_file(path: Path) -> bool:
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(mode)
+
+
 def open_confined_read_fd(workspace: Path, target: Path) -> int | None:
-    """Open the validated resolved path for reading (O_NOFOLLOW when supported)."""
+    """Open the validated resolved path for reading (regular files only)."""
     validated = confined_workspace_read_path(workspace, target)
-    if validated is None:
+    if validated is None or not _is_regular_file(validated):
         return None
     flags = os.O_RDONLY
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
@@ -127,17 +140,16 @@ def read_bytes_confined(workspace: Path, path: Path, *, site: str) -> bytes | No
 
 
 def confined_file_size(workspace: Path, path: Path, *, site: str) -> int | None:
+    """Return the size of a regular file without opening pipes or FIFOs."""
     if site not in RUNTIME_READ_SITES:
         raise ValueError(f"unregistered runtime read site: {site}")
-    fd = open_confined_read_fd(workspace, path)
-    if fd is None:
+    validated = confined_workspace_read_path(workspace, path)
+    if validated is None or not _is_regular_file(validated):
         return None
     try:
-        return os.fstat(fd).st_size
+        return os.lstat(validated).st_size
     except OSError:
         return None
-    finally:
-        os.close(fd)
 
 
 def _wheel_dist_info_names(names: set[str]) -> list[tuple[str, str]]:
@@ -152,11 +164,36 @@ def _wheel_dist_info_names(names: set[str]) -> list[tuple[str, str]]:
     return [(folder, folder[: -len(".dist-info")]) for folder in sorted(folders)]
 
 
+def _metadata_distribution_name(text: str) -> str | None:
+    for line in text.splitlines():
+        if line.startswith("Name:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _read_zip_member_bounded(archive: zipfile.ZipFile, name: str) -> bytes | None:
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return None
+    if info.file_size > MAX_ZIP_MEMBER_BYTES or info.compress_size > MAX_ZIP_MEMBER_BYTES:
+        return None
+    try:
+        data = archive.read(name)
+    except (MemoryError, OSError, zipfile.BadZipFile):
+        return None
+    if len(data) > MAX_ZIP_MEMBER_BYTES:
+        return None
+    return data
+
+
 def dependency_wheel_is_usable(workspace: Path, path: Path) -> bool:
     """True only for a confined jsonschema wheel with valid top-level wheel metadata."""
     site = "dependency_wheel.archive"
     if site not in RUNTIME_READ_SITES:
         raise ValueError(f"unregistered runtime read site: {site}")
+    if not _is_regular_file(path):
+        return False
     fd = open_confined_read_fd(workspace, path)
     if fd is None:
         return False
@@ -171,9 +208,9 @@ def dependency_wheel_is_usable(workspace: Path, path: Path) -> bool:
         return False
     finally:
         os.close(fd)
-    if not zipfile.is_zipfile(BytesIO(payload)):
-        return False
     try:
+        if not zipfile.is_zipfile(BytesIO(payload)):
+            return False
         with zipfile.ZipFile(BytesIO(payload)) as archive:
             names = set(archive.namelist())
             for dist_info, stem in _wheel_dist_info_names(names):
@@ -183,19 +220,23 @@ def dependency_wheel_is_usable(workspace: Path, path: Path) -> bool:
                 wheel_name = f"{dist_info}/WHEEL"
                 if metadata_name not in names or wheel_name not in names:
                     continue
+                metadata_bytes = _read_zip_member_bounded(archive, metadata_name)
+                wheel_bytes = _read_zip_member_bounded(archive, wheel_name)
+                if metadata_bytes is None or wheel_bytes is None:
+                    continue
                 try:
-                    metadata = archive.read(metadata_name).decode("utf-8", errors="replace")
-                    wheel_meta = archive.read(wheel_name).decode("utf-8", errors="replace")
-                except (KeyError, OSError, UnicodeError):
+                    metadata = metadata_bytes.decode("utf-8", errors="replace")
+                    wheel_meta = wheel_bytes.decode("utf-8", errors="replace")
+                except UnicodeError:
                     continue
                 if not metadata.strip() or not wheel_meta.strip():
                     continue
-                if "Name: jsonschema" not in metadata:
+                if _metadata_distribution_name(metadata) != "jsonschema":
                     continue
                 if "Wheel-Version:" not in wheel_meta:
                     continue
                 return True
-    except (OSError, zipfile.BadZipFile):
+    except (MemoryError, OSError, zipfile.BadZipFile):
         return False
     return False
 

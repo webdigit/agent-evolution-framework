@@ -52,7 +52,7 @@ def _collect_violations(module_path: Path) -> list[str]:
 
 
 def test_runtime_modules_do_not_read_paths_directly():
-    """Unregistered direct reads must fail this test (B2 demonstrability)."""
+    """Advisory syntax guard — behavior tests per site are authoritative (see M2)."""
     violations: list[str] = []
     for name in RUNTIME_READ_GUARD_MODULES:
         violations.extend(_collect_violations(SRC / name))

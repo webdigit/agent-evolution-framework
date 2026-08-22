@@ -25,12 +25,24 @@ module.
 the version is read from the project venv tree (`site-packages/aef/_version.py`)
 without executing that interpreter. The envelope names the exact source path in
 `declared_version_source`, reports `running_module_version` from the current CLI
-process, and lists `declared_env_install_evidence` (for example `dist-info`,
-`record`, `console_script`) when those markers exist on disk. A hand-crafted tree
-without install markers is still reported as declared — `doctor` does not verify
-that `pip install` succeeded or that `import aef` would work inside that venv.
+process, and records `declared_env_tree_read:unverified` in `observations`.
+**`doctor` does not verify that `pip install` succeeded** — there is no install
+evidence index. A hand-crafted tree and a real install can produce the same human
+disclaimer: `Trust: tree read only (pip install not verified)`.
 For `discovery_method: python_module`, the version is the package imported by the
 current CLI process.
+
+**Confined reads and threat model.** Runtime reads under the workspace go through
+`runtime_confined_io` (registered sites, bounded materialization, regular files
+only — FIFOs and directories are not opened for content). This protects against
+**static** hostile content in a cloned repository (symlinks, zip bombs, named
+pipes). It does **not** protect against a concurrent process rewriting paths
+inside the workspace during `doctor` (TOCTOU on intermediate directories). That
+race requires an attacker who can already modify the workspace while you run
+`doctor`; such an attacker can edit `_version.py` directly. An AST syntax guard
+in tests catches obvious direct `Path.read_*` regressions but is not a complete
+coverage proof — **per-site behavior tests** (outbound symlinks must not change
+reported values) are the enforcement layer.
 
 `workspace_compatible` is `true` when `.agent/manifest.json` is present and
 readable inside the workspace, `false` when initialization is absent, and `null`
