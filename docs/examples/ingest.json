@@ -5,7 +5,7 @@
       "digest": "sha256:40beb31595e58d27ceef070d74ab003ffc53957a03c18fd9f7b32699d5eb6634",
       "events": [
         {
-          "id": "E1",
+          "id": "e1",
           "novel": true,
           "pattern_key": "init-dry-run"
         }

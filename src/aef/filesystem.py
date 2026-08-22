@@ -5,6 +5,8 @@ import os
 import stat
 import tempfile
 import hashlib
+import contextlib
+import threading
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -57,6 +59,53 @@ class CompetencyDeclarationRecoveryRequiredError(RuntimeError):
     """Raised when ordinary writes encounter an unfinished declaration transaction."""
 
     code = "competency_declaration_recovery_required"
+
+
+class WorkspaceContentionError(RuntimeError):
+    """Raised when a workspace snapshot is stale under concurrent mutation."""
+
+    code = "workspace_contention"
+
+
+_WORKSPACE_LOCK_STATE = threading.local()
+WORKSPACE_MUTATION_LOCK_PATH = ".aef-workspace-mutation.lock"
+
+
+@contextlib.contextmanager
+def workspace_mutation_lock(root: str | Path):
+    """Serialize workspace mutations and reject stale apply snapshots."""
+    resolved = Path(root).resolve()
+    held = getattr(_WORKSPACE_LOCK_STATE, "root", None)
+    if held == resolved:
+        yield
+        return
+    lock_path = resolved / WORKSPACE_MUTATION_LOCK_PATH
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        _WORKSPACE_LOCK_STATE.root = resolved
+        try:
+            yield
+        finally:
+            _WORKSPACE_LOCK_STATE.root = None
+    finally:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 TRANSACTION_BUSINESS_PATHS = frozenset({
@@ -617,41 +666,62 @@ def apply_workspace(
         mutation_paths.update(diff["removed"])
     if not mutation_paths:
         return diff
-    current_files = current.get("files", {}) if isinstance(current, dict) else {}
-    if EVALUATION_TRANSACTION_PATH in current_files:
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
+    with workspace_mutation_lock(root):
+        fresh = load_workspace(root)
+        fresh_files = fresh.get("files") or {}
+        current_files = current.get("files", {}) if isinstance(current, dict) else {}
+        if (
+            EVALUATION_TRANSACTION_PATH in fresh_files
+            or EVALUATION_TRANSACTION_PATH in current_files
+        ):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if _evaluation_transaction_entry_present(root):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if (
+            UPGRADE_TRANSACTION_PATH in fresh_files
+            or UPGRADE_TRANSACTION_PATH in current_files
+        ):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if _upgrade_transaction_entry_present(root):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if (
+            COMPETENCY_DECLARATION_TRANSACTION_PATH in fresh_files
+            or COMPETENCY_DECLARATION_TRANSACTION_PATH in current_files
+        ):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        if _competency_declaration_transaction_entry_present(root):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        if fresh_files != current_files:
+            raise WorkspaceContentionError(
+                "workspace changed since it was loaded for mutation"
+            )
+        if _evaluation_transaction_entry_present(root):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if _upgrade_transaction_entry_present(root):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if _competency_declaration_transaction_entry_present(root):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        return _apply_workspace_unchecked(
+            root, current, desired, allow_delete=allow_delete
         )
-    if _evaluation_transaction_entry_present(root):
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
-        )
-    # Reinspect immediately before entering the ordinary writer. This narrows
-    # the non-hostile TOCTOU window without claiming native handle-relative
-    # protection in the V1 threat model.
-    if _evaluation_transaction_entry_present(root):
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
-        )
-    if UPGRADE_TRANSACTION_PATH in current_files:
-        raise UpgradeRecoveryRequiredError(
-            "upgrade recovery is required before workspace mutation"
-        )
-    if _upgrade_transaction_entry_present(root):
-        raise UpgradeRecoveryRequiredError(
-            "upgrade recovery is required before workspace mutation"
-        )
-    if COMPETENCY_DECLARATION_TRANSACTION_PATH in current_files:
-        raise CompetencyDeclarationRecoveryRequiredError(
-            "competency declaration recovery is required before workspace mutation"
-        )
-    if _competency_declaration_transaction_entry_present(root):
-        raise CompetencyDeclarationRecoveryRequiredError(
-            "competency declaration recovery is required before workspace mutation"
-        )
-    return _apply_workspace_unchecked(
-        root, current, desired, allow_delete=allow_delete
-    )
 
 
 def snapshot_workspace(root: str | Path) -> dict[str, Any]:

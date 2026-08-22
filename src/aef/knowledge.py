@@ -1,5 +1,22 @@
 from copy import deepcopy
 
+MAX_EVIDENCE_IDS = 128
+
+
+def union_evidence_ids(
+    left: list[str] | None,
+    right: list[str] | None,
+    *,
+    max_items: int = MAX_EVIDENCE_IDS,
+) -> list[str]:
+    """Deterministic bounded union of evidence identifiers."""
+    merged = sorted({
+        item
+        for item in (left or []) + (right or [])
+        if isinstance(item, str) and item
+    })
+    return merged[:max_items]
+
 
 def upsert_by_id(records, record):
     out = deepcopy(records)
@@ -7,7 +24,13 @@ def upsert_by_id(records, record):
         if existing.get("id") == record.get("id"):
             if existing == record:
                 return "NO_CHANGE", out
-            out[i] = deepcopy(record)
+            merged = deepcopy(record)
+            if "evidence_ids" in existing or "evidence_ids" in record:
+                merged["evidence_ids"] = union_evidence_ids(
+                    existing.get("evidence_ids"),
+                    record.get("evidence_ids"),
+                )
+            out[i] = merged
             return "CHANGE", out
     out.append(deepcopy(record))
     return "CHANGE", out

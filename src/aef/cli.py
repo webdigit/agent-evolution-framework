@@ -22,6 +22,7 @@ from .filesystem import (
     CompetencyDeclarationRecoveryRequiredError,
     EvaluationRecoveryRequiredError,
     UpgradeRecoveryRequiredError,
+    WorkspaceContentionError,
     apply_workspace,
     load_workspace,
     plan_workspace,
@@ -970,8 +971,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="ingest declared learning events from persisted records",
         description=(
             "Cite persisted records and declare normalized learning events. "
-            "Derives signals and observations only. Does not grant authority, "
-            "create XP, or write records."
+            "Derives learning signals, observations, and candidate hypotheses only. "
+            "Does not grant authority, create XP, or write records."
         ),
     )
     ingest_parser.add_argument(
@@ -1288,6 +1289,18 @@ def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             dry_run=args.dry_run,
             result={},
             meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("INGEST", "BLOCKED")
+    except WorkspaceContentionError as exc:
+        envelope = _envelope(
+            command="INGEST",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code},
             diff=None,
         )
         return envelope, _exit_code("INGEST", "BLOCKED")
@@ -1944,6 +1957,18 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         )
         return envelope, 4
     elif isinstance(exc, IngestBlockedError):
+        envelope = _envelope(
+            command=str(getattr(args, "command", "ingest")).upper(),
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, WorkspaceContentionError):
         envelope = _envelope(
             command=str(getattr(args, "command", "ingest")).upper(),
             workspace=args.workspace,

@@ -5,6 +5,7 @@ from typing import Any
 
 import jsonschema
 
+from .knowledge import union_evidence_ids
 from .record_document import InvalidRecordSubmissionError, validate_record_id
 from .schema_validation import draft202012_validator, load_packaged_schema
 from .strict_json import InvalidStrictJSONError, validate_strict_json
@@ -87,6 +88,10 @@ def _validate_event(event: Any, event_ids: set[str]) -> None:
     event_id = event.get("id")
     if not isinstance(event_id, str) or not event_id.strip():
         _reject("invalid_event_id", "each event requires a non-empty id.")
+    try:
+        event_id = validate_record_id(event_id)
+    except InvalidRecordSubmissionError as exc:
+        raise InvalidIngestSubmissionError(exc.code, str(exc)) from exc
     if event_id in event_ids:
         _reject("duplicate_event_id", "each event id may appear only once in the intake.")
     event_ids.add(event_id)
@@ -110,6 +115,18 @@ def _validate_event(event: Any, event_ids: set[str]) -> None:
         _reject("missing_rule_id", "rule_mismatch events require rule_id.")
     if kind == "success" and "explained" not in event:
         _reject("missing_explained", "success events require explained.")
+    pattern_key = event.get("pattern_key")
+    if pattern_key is not None:
+        try:
+            validate_record_id(pattern_key)
+        except InvalidRecordSubmissionError as exc:
+            raise InvalidIngestSubmissionError(exc.code, str(exc)) from exc
+    competency = event.get("competency")
+    if competency is not None:
+        try:
+            validate_record_id(competency)
+        except InvalidRecordSubmissionError as exc:
+            raise InvalidIngestSubmissionError(exc.code, str(exc)) from exc
 
 
 def flatten_ingest_events(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -297,6 +314,11 @@ def merge_existing_source_records(
                 )
                 if merged:
                     next_item[SOURCE_RECORDS_KEY] = merged
+                if "evidence_ids" in old or "evidence_ids" in next_item:
+                    next_item["evidence_ids"] = union_evidence_ids(
+                        old.get("evidence_ids"),
+                        next_item.get("evidence_ids"),
+                    )
             updated.append(next_item)
         out[collection] = updated
     return out

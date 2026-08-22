@@ -227,7 +227,7 @@ def test_evaluate_record_ingest_do_not_create_competency(tmp_path, capsys):
         "records": [{
             "record_id": persisted["record_id"],
             "digest": persisted["digest"],
-            "events": [{"id": "E1", "novel": True, "pattern_key": "init-dry-run"}],
+            "events": [{"id": "e1", "novel": True, "pattern_key": "init-dry-run"}],
         }],
     })
     invoke(

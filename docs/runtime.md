@@ -48,8 +48,8 @@ layer for confined reads.
 **Dependency wheels and offline mode.** `offline_basis: self_attested_checksum`
 requires a co-located `jsonschema-*.whl` file whose name matches the expected
 pattern. **`doctor` does not open or parse wheel archives** — presence and size are
-checked via `lstat` only (no zip decompression). Up to
-`MAX_DEPENDENCY_WHEELS_TO_SCAN` (20) candidate wheels are inspected per directory.
+checked via `lstat` only (no zip decompression). Every confined `jsonschema-*.whl`
+filename in the wheel directory is checked; empty decoys are skipped.
 This avoids zip-bomb amplification while honestly stating that filename presence
 is not proof of a valid installable wheel.
 

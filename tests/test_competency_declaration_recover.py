@@ -164,7 +164,7 @@ def test_open_declaration_journal_blocks_ingest(tmp_path, capsys):
         "records": [{
             "record_id": persisted["record_id"],
             "digest": persisted["digest"],
-            "events": [{"id": "E1", "novel": True, "pattern_key": "x"}],
+            "events": [{"id": "e1", "novel": True, "pattern_key": "x"}],
         }],
     })
     code, envelope, _ = invoke(

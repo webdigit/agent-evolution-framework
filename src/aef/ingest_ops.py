@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from .filesystem import (
+    _evaluation_transaction_entry_present,
     apply_workspace,
     is_link_or_reparse_point,
     load_workspace,
     plan_workspace,
+    workspace_mutation_lock,
 )
 from .ingest_intake import (
     IngestBlockedError,
@@ -67,7 +69,7 @@ def _guard_transactions(root: Path, current: dict[str, Any]) -> None:
             "upgrade_recovery_required",
             "upgrade recovery is required before workspace mutation",
         )
-    if evaluation_recovery_required(current):
+    if evaluation_recovery_required(current) or _evaluation_transaction_entry_present(root):
         raise IngestBlockedError(
             "evaluation_recovery_required",
             "evaluation recovery is required before workspace mutation",
@@ -170,45 +172,46 @@ def plan_ingest(
     """Validate intake and project knowledge. Write only when dry_run is false."""
     intake = validate_ingest_submission(document)
     root = Path(root).resolve()
-    current = load_workspace(root)
-    _guard_transactions(root, current)
-    knowledge = deepcopy(_require_initialized(current))
-    record_ids = [citation["record_id"] for citation in intake["records"]]
-    persisted = _load_persisted_records(root, current, record_ids)
-    bind_ingest_citations(intake, persisted)
-    events = flatten_ingest_events(intake)
-    citations = event_citations(intake)
-    _, next_state = ingest_events(knowledge, events)
-    next_state = attach_source_records(next_state, citations)
-    next_state = merge_existing_source_records(knowledge, next_state)
-    try:
-        validate_persisted_knowledge(next_state)
-    except Exception as exc:
-        raise InvalidIngestSubmissionError(
-            "invalid_knowledge_state",
-            "projected knowledge is not a valid persisted knowledge document.",
-        ) from exc
+    with workspace_mutation_lock(root):
+        current = load_workspace(root)
+        _guard_transactions(root, current)
+        knowledge = deepcopy(_require_initialized(current))
+        record_ids = [citation["record_id"] for citation in intake["records"]]
+        persisted = _load_persisted_records(root, current, record_ids)
+        bind_ingest_citations(intake, persisted)
+        events = flatten_ingest_events(intake)
+        citations = event_citations(intake)
+        _, next_state = ingest_events(knowledge, events)
+        next_state = attach_source_records(next_state, citations)
+        next_state = merge_existing_source_records(knowledge, next_state)
+        try:
+            validate_persisted_knowledge(next_state)
+        except Exception as exc:
+            raise InvalidIngestSubmissionError(
+                "invalid_knowledge_state",
+                "projected knowledge is not a valid persisted knowledge document.",
+            ) from exc
 
-    desired = deepcopy(current)
-    desired.setdefault("files", {})
-    desired["files"][KNOWLEDGE_PATH] = deepcopy(next_state)
-    status = "NO_CHANGE" if next_state == knowledge else "CHANGE"
-    result = {
-        "records": record_ids,
-        "events_accepted": len(events),
-        "projected": _projected(next_state),
-        "knowledge_path": KNOWLEDGE_PATH,
-        "human_action_required": False,
-    }
-    meta: dict[str, Any] = {}
-    if status == "NO_CHANGE" or dry_run:
-        diff = (
-            {"created": [], "modified": [], "removed": []}
-            if status == "NO_CHANGE"
-            else plan_workspace(current, desired)
-        )
-        return status, result, meta, diff
-    return status, result, meta, apply_workspace(root, current, desired)
+        desired = deepcopy(current)
+        desired.setdefault("files", {})
+        desired["files"][KNOWLEDGE_PATH] = deepcopy(next_state)
+        status = "NO_CHANGE" if next_state == knowledge else "CHANGE"
+        result = {
+            "records": record_ids,
+            "events_accepted": len(events),
+            "projected": _projected(next_state),
+            "knowledge_path": KNOWLEDGE_PATH,
+            "human_action_required": False,
+        }
+        meta: dict[str, Any] = {}
+        if status == "NO_CHANGE" or dry_run:
+            diff = (
+                {"created": [], "modified": [], "removed": []}
+                if status == "NO_CHANGE"
+                else plan_workspace(current, desired)
+            )
+            return status, result, meta, diff
+        return status, result, meta, apply_workspace(root, current, desired)
 
 
 INGEST_DERIVED_PREFIXES = (
@@ -219,6 +222,10 @@ INGEST_DERIVED_PREFIXES = (
     "signal:unexplained-success:",
     "observation:signal:",
     "hypothesis:",
+)
+
+INGEST_DERIVED_ANNOUNCEMENT = (
+    "Derives learning signals, observations, and candidate hypotheses only."
 )
 
 

@@ -154,8 +154,9 @@ Each event requires an `id` and either `novel` set to `true` or a `kind` of
 `pattern_key` and `competency` are optional. Unknown fields are rejected.
 Duplicate keys are rejected at every object depth.
 
-INGEST derives signals and observations only. It does not create XP, rules,
-or competencies, and it is not a runtime `doctor` install.
+INGEST derives learning signals, observations, and candidate hypotheses only.
+It does not create XP, rules, or competencies, and it is not a runtime `doctor`
+install.
 
 ## COMPETENCY declaration
 

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from .runtime_confined_io import (
-    MAX_DEPENDENCY_WHEELS_TO_SCAN,
     dependency_wheel_is_usable,
     proposed_install_path_is_safe,
     read_bytes_confined,
@@ -114,15 +113,11 @@ def dependency_wheels_present(directory: Path, workspace: Path) -> bool:
     """Offline install needs a confined jsonschema-*.whl filename (archive not opened)."""
     if not directory.is_dir():
         return False
-    scanned = 0
     for item in sorted(directory.iterdir(), key=lambda path: path.name):
-        if scanned >= MAX_DEPENDENCY_WHEELS_TO_SCAN:
-            break
         if not item.is_file() or item.suffix != ".whl":
             continue
         if not item.name.startswith(JSONSCHEMA_WHEEL_PREFIX):
             continue
-        scanned += 1
         if dependency_wheel_is_usable(workspace, item):
             return True
     return False

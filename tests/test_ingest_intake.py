@@ -21,7 +21,7 @@ def intake(**overrides):
                 "record_id": "session-alpha",
                 "digest": "sha256:" + ("a" * 64),
                 "events": [
-                    {"id": "E1", "novel": True, "pattern_key": "init-dry-run"},
+                    {"id": "e1", "novel": True, "pattern_key": "init-dry-run"},
                 ],
             }
         ],
@@ -49,7 +49,7 @@ def persisted(record_id="session-alpha", digest=None):
             intake(records=[{
                 "record_id": "session-alpha",
                 "digest": "sha256:" + ("a" * 64),
-                "events": [{"id": "E1", "novel": True}],
+                "events": [{"id": "e1", "novel": True}],
                 "extra": True,
             }]),
             "invalid_ingest_submission",
@@ -60,7 +60,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "../escape",
                     "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "E1", "novel": True}],
+                    "events": [{"id": "e1", "novel": True}],
                 }],
             },
             "invalid_ingest_submission",
@@ -71,7 +71,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "session-alpha",
                     "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "E1", "kind": "incident"}],
+                    "events": [{"id": "e1", "kind": "incident"}],
                 }],
             },
             "invalid_ingest_submission",
@@ -82,7 +82,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "session-alpha",
                     "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "E1"}],
+                    "events": [{"id": "e1"}],
                 }],
             },
             "invalid_ingest_event",
@@ -93,7 +93,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "session-alpha",
                     "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "E1", "kind": "rule_mismatch"}],
+                    "events": [{"id": "e1", "kind": "rule_mismatch"}],
                 }],
             },
             "missing_rule_id",
@@ -104,7 +104,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "session-alpha",
                     "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "E1", "kind": "success"}],
+                    "events": [{"id": "e1", "kind": "success"}],
                 }],
             },
             "missing_explained",
@@ -115,7 +115,7 @@ def persisted(record_id="session-alpha", digest=None):
                 "records": [{
                     "record_id": "session-alpha",
                     "digest": "not-a-digest",
-                    "events": [{"id": "E1", "novel": True}],
+                    "events": [{"id": "e1", "novel": True}],
                 }],
             },
             "invalid_ingest_submission",
@@ -135,14 +135,14 @@ def test_competency_is_optional_and_multi_events_are_accepted():
             "record_id": "session-alpha",
             "digest": "sha256:" + ("a" * 64),
             "events": [
-                {"id": "E1", "novel": True, "pattern_key": "gap"},
-                {"id": "E2", "kind": "help_request", "pattern_key": "gap"},
-                {"id": "E3", "kind": "success", "explained": False},
+                {"id": "e1", "novel": True, "pattern_key": "gap"},
+                {"id": "e2", "kind": "help_request", "pattern_key": "gap"},
+                {"id": "e3", "kind": "success", "explained": False},
             ],
         }],
     }
     validated = validate_ingest_submission(document)
-    assert [event["id"] for event in flatten_ingest_events(validated)] == ["E1", "E2", "E3"]
+    assert [event["id"] for event in flatten_ingest_events(validated)] == ["e1", "e2", "e3"]
     assert "competency" not in validated["records"][0]["events"][0]
 
 
@@ -169,10 +169,10 @@ def test_same_intake_is_idempotent_and_keeps_engine_ids():
     assert second_status == "NO_CHANGE"
     assert first["signals"][0]["id"] == "signal:novelty:init-dry-run"
     first_with = attach_source_records(first, {
-        "E1": {"record_id": "session-alpha", "digest": "sha256:" + ("a" * 64)},
+        "e1": {"record_id": "session-alpha", "digest": "sha256:" + ("a" * 64)},
     })
     replay_with = attach_source_records(second, {
-        "E1": {"record_id": "session-alpha", "digest": "sha256:" + ("a" * 64)},
+        "e1": {"record_id": "session-alpha", "digest": "sha256:" + ("a" * 64)},
     })
     assert first_with == replay_with
     assert first_with["signals"][0]["source_records"] == [{

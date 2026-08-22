@@ -42,13 +42,28 @@
       "additionalProperties": false,
       "required": ["id"],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
         "novel": {"type": "boolean"},
         "kind": {
           "enum": ["help_request", "human_correction", "rule_mismatch", "success"]
         },
-        "pattern_key": {"type": "string", "minLength": 1},
-        "competency": {"type": "string", "minLength": 1},
+        "pattern_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "competency": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
         "rule_id": {"type": "string", "minLength": 1},
         "explained": {"type": "boolean"}
       }

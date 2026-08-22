@@ -32,7 +32,7 @@ def intake_for(persisted, events=None):
             "record_id": persisted["record_id"],
             "digest": persisted["digest"],
             "events": events or [
-                {"id": "E1", "novel": True, "pattern_key": "init-dry-run"},
+                {"id": "e1", "novel": True, "pattern_key": "init-dry-run"},
             ],
         }],
     }

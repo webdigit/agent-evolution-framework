@@ -25,9 +25,6 @@ RUNTIME_READ_GUARD_MODULES = (
     "runtime_doctor.py",
 )
 
-MAX_DEPENDENCY_WHEELS_TO_SCAN = 20
-
-
 def workspace_contains(workspace: Path, target: Path) -> bool:
     try:
         root = workspace.resolve()

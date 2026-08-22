@@ -234,19 +234,9 @@ def test_dependency_wheel_archive_not_opened(tmp_path):
     assert dependency_wheel_is_usable(workspace, wheel) is True
 
 
-def test_many_dependency_wheels_scan_is_bounded(tmp_path, monkeypatch):
-    from aef.runtime_confined_io import MAX_DEPENDENCY_WHEELS_TO_SCAN, dependency_wheel_is_usable
-
+def test_many_empty_dependency_wheels_do_not_hide_valid_wheel(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    calls = {"count": 0}
-    original = dependency_wheel_is_usable
-
-    def counting_usable(ws, path):
-        calls["count"] += 1
-        return original(ws, path)
-
-    monkeypatch.setattr("aef.runtime_doctor.dependency_wheel_is_usable", counting_usable)
     payload = b"wheel-bytes"
     aef_wheel = workspace / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     aef_wheel.write_bytes(payload)
@@ -254,11 +244,10 @@ def test_many_dependency_wheels_scan_is_bounded(tmp_path, monkeypatch):
     (workspace / f"{aef_wheel.name}.sha256").write_text(
         f"{digest}  {aef_wheel.name}\n", encoding="utf-8",
     )
-    for index in range(MAX_DEPENDENCY_WHEELS_TO_SCAN + 5):
+    for index in range(25):
         trap = workspace / f"jsonschema-aaa-{index:02d}-py3-none-any.whl"
         trap.write_bytes(b"")
     good = workspace / "jsonschema-zzz-good-py3-none-any.whl"
     good.write_bytes(b"y")
     result = diagnose_runtime(workspace, can_import=lambda: False)
-    assert calls["count"] == MAX_DEPENDENCY_WHEELS_TO_SCAN
-    assert result["offline_basis"] is None
+    assert result["offline_basis"] == "self_attested_checksum"
