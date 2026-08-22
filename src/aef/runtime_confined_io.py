@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 import stat
-import zipfile
-from io import BytesIO
 from pathlib import Path
 
 from .filesystem import is_link_or_reparse_point
@@ -16,7 +14,6 @@ RUNTIME_READ_SITES: frozenset[str] = frozenset({
     "agent.runtime_requirements",
     "declared_env.pyvenv_cfg",
     "declared_env.version_file",
-    "declared_env.console_script",
     "local_wheel.sha256",
     "checksum.sidecar",
     "dependency_wheel.archive",
@@ -28,7 +25,7 @@ RUNTIME_READ_GUARD_MODULES = (
     "runtime_doctor.py",
 )
 
-MAX_ZIP_MEMBER_BYTES = MAX_FILE_BYTES
+MAX_DEPENDENCY_WHEELS_TO_SCAN = 20
 
 
 def workspace_contains(workspace: Path, target: Path) -> bool:
@@ -152,93 +149,21 @@ def confined_file_size(workspace: Path, path: Path, *, site: str) -> int | None:
         return None
 
 
-def _wheel_dist_info_names(names: set[str]) -> list[tuple[str, str]]:
-    """Return (dist-info folder, stem) pairs found in a wheel archive."""
-    folders: set[str] = set()
-    for name in names:
-        if ".dist-info/" not in name:
-            continue
-        folder = name.split("/", 1)[0]
-        if folder.endswith(".dist-info"):
-            folders.add(folder)
-    return [(folder, folder[: -len(".dist-info")]) for folder in sorted(folders)]
-
-
-def _metadata_distribution_name(text: str) -> str | None:
-    for line in text.splitlines():
-        if line.startswith("Name:"):
-            return line.split(":", 1)[1].strip()
-    return None
-
-
-def _read_zip_member_bounded(archive: zipfile.ZipFile, name: str) -> bytes | None:
-    try:
-        info = archive.getinfo(name)
-    except KeyError:
-        return None
-    if info.file_size > MAX_ZIP_MEMBER_BYTES or info.compress_size > MAX_ZIP_MEMBER_BYTES:
-        return None
-    try:
-        data = archive.read(name)
-    except (MemoryError, OSError, zipfile.BadZipFile):
-        return None
-    if len(data) > MAX_ZIP_MEMBER_BYTES:
-        return None
-    return data
-
-
 def dependency_wheel_is_usable(workspace: Path, path: Path) -> bool:
-    """True only for a confined jsonschema wheel with valid top-level wheel metadata."""
+    """True when a confined jsonschema wheel file is present (filename only — archive not opened)."""
     site = "dependency_wheel.archive"
     if site not in RUNTIME_READ_SITES:
         raise ValueError(f"unregistered runtime read site: {site}")
-    if not _is_regular_file(path):
+    if not path.name.startswith("jsonschema-") or path.suffix != ".whl":
         return False
-    fd = open_confined_read_fd(workspace, path)
-    if fd is None:
+    validated = confined_workspace_read_path(workspace, path)
+    if validated is None or not _is_regular_file(validated):
         return False
     try:
-        size = os.fstat(fd).st_size
-        if size == 0 or size > MAX_FILE_BYTES:
-            return False
-        payload = _read_fd_bytes(fd, max_bytes=MAX_FILE_BYTES)
-        if payload is None:
-            return False
+        size = os.lstat(validated).st_size
     except OSError:
         return False
-    finally:
-        os.close(fd)
-    try:
-        if not zipfile.is_zipfile(BytesIO(payload)):
-            return False
-        with zipfile.ZipFile(BytesIO(payload)) as archive:
-            names = set(archive.namelist())
-            for dist_info, stem in _wheel_dist_info_names(names):
-                if not stem.startswith("jsonschema-"):
-                    continue
-                metadata_name = f"{dist_info}/METADATA"
-                wheel_name = f"{dist_info}/WHEEL"
-                if metadata_name not in names or wheel_name not in names:
-                    continue
-                metadata_bytes = _read_zip_member_bounded(archive, metadata_name)
-                wheel_bytes = _read_zip_member_bounded(archive, wheel_name)
-                if metadata_bytes is None or wheel_bytes is None:
-                    continue
-                try:
-                    metadata = metadata_bytes.decode("utf-8", errors="replace")
-                    wheel_meta = wheel_bytes.decode("utf-8", errors="replace")
-                except UnicodeError:
-                    continue
-                if not metadata.strip() or not wheel_meta.strip():
-                    continue
-                if _metadata_distribution_name(metadata) != "jsonschema":
-                    continue
-                if "Wheel-Version:" not in wheel_meta:
-                    continue
-                return True
-    except (MemoryError, OSError, zipfile.BadZipFile):
-        return False
-    return False
+    return 0 < size <= MAX_FILE_BYTES
 
 
 def install_target_occupied(path: Path) -> bool:

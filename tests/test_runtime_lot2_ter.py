@@ -222,7 +222,7 @@ def test_self_attested_checksum_disclosed_for_offline(tmp_path, capsys):
     assert "Network   : no" in captured.out
 
 
-def test_jsonschema_non_zip_wheel_does_not_enable_offline(tmp_path):
+def test_jsonschema_wheel_filename_enables_offline(tmp_path):
     payload = b"wheel-bytes"
     wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     wheel.write_bytes(payload)
@@ -231,8 +231,8 @@ def test_jsonschema_non_zip_wheel_does_not_enable_offline(tmp_path):
     fake_dep = tmp_path / "jsonschema-4.22.0-py3-none-any.whl"
     fake_dep.write_bytes(b"not-a-zip-wheel")
     result = diagnose_runtime(tmp_path, can_import=lambda: False)
-    assert result["network_required"] is True
-    assert result["offline_basis"] is None
+    assert result["network_required"] is False
+    assert result["offline_basis"] == "self_attested_checksum"
 
 
 def test_jsonschema_zip_wheel_enables_offline(tmp_path):

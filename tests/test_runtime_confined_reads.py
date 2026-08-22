@@ -1,22 +1,45 @@
-"""Guard tests for confined runtime reads — symlink attacks and install safety."""
+"""Guard tests for confined runtime reads — per-site symlink/FIFO behavior."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import shutil
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from aef.runtime_discovery import discover_runtime, inspect_venv_tree
+from aef.runtime_confined_io import open_confined_read_fd
+from aef.runtime_discovery import inspect_venv_tree, read_expected_package_version
 from aef.runtime_doctor import diagnose_runtime, resolve_proposed_env_path
 from tests.test_runtime_discovery import write_venv
 from tests.test_runtime_lot2_ter import _write_declared_aef, _write_jsonschema_wheel
 
 
-def test_symlinked_pyvenv_cfg_outside_workspace_is_not_read(tmp_path):
+def test_outbound_symlink_site_agent_runtime_requirements(tmp_path):
+    if os.name == "nt":
+        pytest.skip("posix symlink witness")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "6.6.6"}),
+        encoding="utf-8",
+    )
+    agent = workspace / ".agent"
+    agent.mkdir()
+    req = agent / "runtime-requirements.json"
+    req.symlink_to(outside / "runtime-requirements.json")
+    info = read_expected_package_version(workspace)
+    assert info["status"] == "invalid"
+    result = diagnose_runtime(workspace, can_import=lambda: False)
+    assert result.get("expected_package_version") is None
+    assert result["decision"] != "OK" or result.get("found_package_version") != "6.6.6"
+
+
+def test_outbound_symlink_site_declared_env_pyvenv_cfg(tmp_path):
     if os.name == "nt":
         pytest.skip("posix symlink witness")
     workspace = tmp_path / "ws"
@@ -33,7 +56,74 @@ def test_symlinked_pyvenv_cfg_outside_workspace_is_not_read(tmp_path):
     assert result["discovery_method"] != "declared_env"
 
 
-def test_symlinked_dependency_wheel_outside_workspace_disables_offline(tmp_path):
+def test_outbound_symlink_site_declared_env_version_file(tmp_path):
+    if os.name == "nt":
+        pytest.skip("posix symlink witness")
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "_version.py").write_text('__version__ = "6.6.6"\n', encoding="utf-8")
+    env = write_venv(workspace / ".aef-venv", kind="posix")
+    pkg = _write_declared_aef(env, "1.2.0")
+    version_file = pkg / "_version.py"
+    version_file.unlink()
+    version_file.symlink_to(outside / "_version.py")
+    agent = workspace / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    result = diagnose_runtime(workspace, can_import=lambda: False)
+    assert result.get("declared_env_mismatch") is None
+    assert result.get("found_package_version") != "6.6.6"
+
+
+def test_outbound_symlink_site_local_wheel_sha256(tmp_path):
+    if os.name == "nt":
+        pytest.skip("posix symlink witness")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = b"wheel-bytes"
+    real_wheel = outside / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    real_wheel.write_bytes(payload)
+    wheel = workspace / real_wheel.name
+    wheel.symlink_to(real_wheel)
+    digest = hashlib.sha256(payload).hexdigest()
+    (workspace / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    _write_jsonschema_wheel(workspace)
+    result = diagnose_runtime(workspace, can_import=lambda: False)
+    assert result["offline_basis"] is None
+    assert result["network_required"] is True
+
+
+def test_outbound_symlink_site_checksum_sidecar(tmp_path):
+    if os.name == "nt":
+        pytest.skip("posix symlink witness")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = b"wheel-bytes"
+    wheel = workspace / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    wheel.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    sidecar = workspace / f"{wheel.name}.sha256"
+    sidecar.write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    sidecar.unlink()
+    outside_sidecar = outside / sidecar.name
+    outside_sidecar.write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    sidecar.symlink_to(outside_sidecar)
+    _write_jsonschema_wheel(workspace)
+    result = diagnose_runtime(workspace, can_import=lambda: False)
+    assert result["local_artifact"] in {"available_unverified", "absent"}
+    assert result["offline_basis"] is None
+
+
+def test_outbound_symlink_site_dependency_wheel(tmp_path):
     if os.name == "nt":
         pytest.skip("posix symlink witness")
     workspace = tmp_path / "ws"
@@ -41,8 +131,6 @@ def test_symlinked_dependency_wheel_outside_workspace_disables_offline(tmp_path)
     payload = b"wheel-bytes"
     wheel = workspace / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     wheel.write_bytes(payload)
-    import hashlib
-
     digest = hashlib.sha256(payload).hexdigest()
     (workspace / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
     outside = tmp_path / "outside"
@@ -68,6 +156,8 @@ def test_internal_workspace_symlink_declared_env_is_accepted(tmp_path):
     (vendored / "_version.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
     env = write_venv(workspace / ".aef-venv", kind="posix")
     pkg = _write_declared_aef(env, "9.9.9")
+    import shutil
+
     shutil.rmtree(pkg)
     pkg.symlink_to(vendored, target_is_directory=True)
     agent = workspace / ".agent"
@@ -105,17 +195,16 @@ def test_broken_external_venv_symlink_blocks_install_proposal(tmp_path):
         assert str(target) not in result["install_command"]
 
 
-def test_fifo_console_script_does_not_block_doctor(tmp_path, capsys):
+def test_fifo_declared_env_version_file_does_not_block_doctor(tmp_path, capsys):
     if os.name == "nt":
         pytest.skip("posix fifo witness")
     workspace = tmp_path / "project"
     workspace.mkdir()
     env = write_venv(workspace / ".aef-venv", kind="posix")
-    _write_declared_aef(env, "1.2.0")
-    console = env / "bin" / "aef"
-    if console.exists():
-        console.unlink()
-    os.mkfifo(console)
+    pkg = _write_declared_aef(env, "1.2.0")
+    version_file = pkg / "_version.py"
+    version_file.unlink()
+    os.mkfifo(version_file)
     from aef import cli
 
     code = cli.main(["--json", "--workspace", str(workspace), "doctor"])
@@ -125,66 +214,51 @@ def test_fifo_console_script_does_not_block_doctor(tmp_path, capsys):
     assert '"command"' in captured.out
 
 
-def test_zip_bomb_wheel_does_not_crash_doctor(tmp_path, monkeypatch):
-    from aef.runtime_confined_io import MAX_ZIP_MEMBER_BYTES, dependency_wheel_is_usable
+def test_open_confined_read_fd_rejects_fifo(tmp_path):
+    if os.name == "nt":
+        pytest.skip("posix fifo witness")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    fifo = workspace / "payload.txt"
+    os.mkfifo(fifo)
+    assert open_confined_read_fd(workspace, fifo) is None
+
+
+def test_dependency_wheel_archive_not_opened(tmp_path):
+    from aef.runtime_confined_io import dependency_wheel_is_usable
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
     wheel = workspace / "jsonschema-4.0.0-py3-none-any.whl"
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("jsonschema-4.0.0.dist-info/METADATA", "Name: jsonschema\n")
-        archive.writestr("jsonschema-4.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+    wheel.write_bytes(b"PK\x03\x04not-opened")
+    assert dependency_wheel_is_usable(workspace, wheel) is True
 
-    original_getinfo = zipfile.ZipFile.getinfo
 
-    def huge_metadata(self, name):
-        info = original_getinfo(self, name)
-        if name.endswith("/METADATA"):
-            info.file_size = MAX_ZIP_MEMBER_BYTES + 1
-        return info
+def test_many_dependency_wheels_scan_is_bounded(tmp_path, monkeypatch):
+    from aef.runtime_confined_io import MAX_DEPENDENCY_WHEELS_TO_SCAN, dependency_wheel_is_usable
 
-    monkeypatch.setattr(zipfile.ZipFile, "getinfo", huge_metadata)
-    assert dependency_wheel_is_usable(workspace, wheel) is False
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    calls = {"count": 0}
+    original = dependency_wheel_is_usable
 
+    def counting_usable(ws, path):
+        calls["count"] += 1
+        return original(ws, path)
+
+    monkeypatch.setattr("aef.runtime_doctor.dependency_wheel_is_usable", counting_usable)
     payload = b"wheel-bytes"
     aef_wheel = workspace / "agent_evolution_framework-1.2.0-py3-none-any.whl"
     aef_wheel.write_bytes(payload)
-    import hashlib
-
     digest = hashlib.sha256(payload).hexdigest()
     (workspace / f"{aef_wheel.name}.sha256").write_text(
         f"{digest}  {aef_wheel.name}\n", encoding="utf-8",
     )
+    for index in range(MAX_DEPENDENCY_WHEELS_TO_SCAN + 5):
+        trap = workspace / f"jsonschema-aaa-{index:02d}-py3-none-any.whl"
+        trap.write_bytes(b"")
+    good = workspace / "jsonschema-zzz-good-py3-none-any.whl"
+    good.write_bytes(b"y")
     result = diagnose_runtime(workspace, can_import=lambda: False)
+    assert calls["count"] == MAX_DEPENDENCY_WHEELS_TO_SCAN
     assert result["offline_basis"] is None
-    assert result["decision"] in {"OK", "INSTALL_REQUIRED", "BLOCKED"}
-
-
-def test_symlinked_console_script_outside_workspace_is_ignored(tmp_path):
-    if os.name == "nt":
-        pytest.skip("posix symlink witness")
-    workspace = tmp_path / "project"
-    workspace.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "payload").write_bytes(b"x" * 128)
-    env = write_venv(workspace / ".aef-venv", kind="posix")
-    _write_declared_aef(env, "1.2.0")
-    console = env / "bin" / "aef"
-    if console.exists():
-        console.unlink()
-    console.symlink_to(outside / "payload")
-    result = diagnose_runtime(workspace, can_import=lambda: False)
-    assert result["discovery_method"] == "declared_env"
-    assert result["found_package_version"] == "1.2.0"
-    assert "declared_env_tree_read:unverified" in result["observations"]
-
-
-def test_jsonschema_wheel_rejects_wrong_distribution_name(tmp_path):
-    from aef.runtime_confined_io import dependency_wheel_is_usable
-
-    wheel = tmp_path / "jsonschema-evil-py3-none-any.whl"
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("jsonschema-evil.dist-info/METADATA", "Name: jsonschemaXXX-evil\n")
-        archive.writestr("jsonschema-evil.dist-info/WHEEL", "Wheel-Version: 1.0\n")
-    assert dependency_wheel_is_usable(tmp_path, wheel) is False

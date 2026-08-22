@@ -33,16 +33,25 @@ For `discovery_method: python_module`, the version is the package imported by th
 current CLI process.
 
 **Confined reads and threat model.** Runtime reads under the workspace go through
-`runtime_confined_io` (registered sites, bounded materialization, regular files
-only — FIFOs and directories are not opened for content). This protects against
-**static** hostile content in a cloned repository (symlinks, zip bombs, named
-pipes). It does **not** protect against a concurrent process rewriting paths
-inside the workspace during `doctor` (TOCTOU on intermediate directories). That
-race requires an attacker who can already modify the workspace while you run
-`doctor`; such an attacker can edit `_version.py` directly. An AST syntax guard
-in tests catches obvious direct `Path.read_*` regressions but is not a complete
-coverage proof — **per-site behavior tests** (outbound symlinks must not change
-reported values) are the enforcement layer.
+`runtime_confined_io` (registered sites, bounded reads, regular files only — FIFOs
+and directories are not opened for content). This protects against **static**
+hostile content in a cloned repository (symlinks, named pipes, oversized files).
+It does **not** protect against a concurrent process rewriting paths inside the
+workspace during `doctor` (TOCTOU on intermediate directories). That race requires
+an attacker who can already modify the workspace while you run `doctor`; such an
+attacker can edit `_version.py` directly. An AST syntax guard in tests catches
+obvious direct `Path.read_*` regressions but is not a complete coverage proof —
+**per-site behavior tests** in `tests/test_runtime_confined_reads.py` (outbound
+symlinks must not leak values read outside the workspace) are the enforcement
+layer for confined reads.
+
+**Dependency wheels and offline mode.** `offline_basis: self_attested_checksum`
+requires a co-located `jsonschema-*.whl` file whose name matches the expected
+pattern. **`doctor` does not open or parse wheel archives** — presence and size are
+checked via `lstat` only (no zip decompression). Up to
+`MAX_DEPENDENCY_WHEELS_TO_SCAN` (20) candidate wheels are inspected per directory.
+This avoids zip-bomb amplification while honestly stating that filename presence
+is not proof of a valid installable wheel.
 
 `workspace_compatible` is `true` when `.agent/manifest.json` is present and
 readable inside the workspace, `false` when initialization is absent, and `null`
@@ -83,8 +92,9 @@ independent trust anchor. Without a matching digest the wheel is
 
 `network_required: false` appears only when `offline_basis` is
 `self_attested_checksum`: checksum matched **and** a non-empty `jsonschema-*.whl`
-wheel (not `jsonschema-specifications-*`) is present beside the AEF wheel.
-This does **not** guarantee a complete air-gap install: transitive dependencies
+file (not `jsonschema-specifications-*`) is present beside the AEF wheel.
+**Archive contents are not verified** — only filename and file size. This does
+**not** guarantee a complete air-gap install: transitive dependencies
 (`attrs`, `referencing`, `rpds-py`, and others) are not verified. Treat offline
 mode as a convenience hint, not a promise. Otherwise the proposal pins against
 PyPI:

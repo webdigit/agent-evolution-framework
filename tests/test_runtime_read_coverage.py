@@ -68,7 +68,6 @@ def test_runtime_read_sites_are_exhaustive():
         "agent.runtime_requirements",
         "declared_env.pyvenv_cfg",
         "declared_env.version_file",
-        "declared_env.console_script",
         "local_wheel.sha256",
         "checksum.sidecar",
         "dependency_wheel.archive",
