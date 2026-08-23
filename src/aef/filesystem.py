@@ -70,13 +70,58 @@ class WorkspaceContentionError(RuntimeError):
 _WORKSPACE_LOCK_STATE = threading.local()
 WORKSPACE_MUTATION_LOCK_PATH = ".agent/state/.workspace-mutation.lock"
 WORKSPACE_MUTATION_LOCK_FALLBACK_PATH = ".aef-workspace-mutation.lock"
-WORKSPACE_INTERNAL_PATHS = frozenset({WORKSPACE_MUTATION_LOCK_PATH})
+WORKSPACE_INTERNAL_PATHS = frozenset({
+    WORKSPACE_MUTATION_LOCK_PATH,
+    WORKSPACE_MUTATION_LOCK_FALLBACK_PATH,
+})
 
 
 def _workspace_mutation_lock_path(root: Path) -> Path:
     if (root / ".agent").is_dir():
         return root / WORKSPACE_MUTATION_LOCK_PATH
     return root / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+
+
+def _is_workspace_transient_path(rel_path: str) -> bool:
+    """Return true for runtime-only paths that must not appear in snapshots."""
+    if rel_path in WORKSPACE_INTERNAL_PATHS:
+        return True
+    return PurePosixPath(rel_path).name.endswith(".tmp")
+
+
+def _cleanup_workspace_mutation_lock_fallback(root: Path) -> None:
+    """Remove the pre-init fallback lock once the canonical workspace exists."""
+    if not (root / ".agent").is_dir():
+        return
+    fallback = root / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+    if fallback.is_file():
+        try:
+            fallback.unlink()
+        except OSError:
+            pass
+
+
+_WORKSPACE_GITIGNORE_LINES = (
+    "# AEF runtime workspace locks — do not commit.",
+    ".aef-workspace-mutation.lock",
+    ".agent/state/.workspace-mutation.lock",
+)
+
+
+def ensure_workspace_gitignore(root: str | Path) -> None:
+    """Ensure runtime lock paths stay out of version control after init."""
+    resolved = Path(root).resolve()
+    path = resolved / ".gitignore"
+    block = "\n".join(_WORKSPACE_GITIGNORE_LINES) + "\n"
+    if path.is_file():
+        existing = path.read_text(encoding="utf-8")
+        if all(line in existing for line in _WORKSPACE_GITIGNORE_LINES[1:]):
+            return
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        path.write_text(existing + block, encoding="utf-8", newline="\n")
+        return
+    path.write_text(block, encoding="utf-8", newline="\n")
 
 
 @contextlib.contextmanager
@@ -120,6 +165,7 @@ def workspace_mutation_lock(root: str | Path):
 
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+        _cleanup_workspace_mutation_lock_fallback(resolved)
 
 
 TRANSACTION_BUSINESS_PATHS = frozenset({
@@ -306,9 +352,14 @@ def load_workspace(root: str | Path) -> dict[str, Any]:
 
     for path in sorted(p for p in agent_dir.rglob("*") if p.is_file()):
         rel = _relative_posix(path, root)
-        if rel in WORKSPACE_INTERNAL_PATHS:
+        if _is_workspace_transient_path(rel):
             continue
-        raw = path.read_text(encoding="utf-8")
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise WorkspaceContentionError(
+                "workspace changed while it was being loaded"
+            ) from exc
 
         if rel in JSON_PATHS or path.suffix.lower() == ".json":
             try:
@@ -682,9 +733,9 @@ def apply_workspace(
         mutation_paths.update(diff["removed"])
     if not mutation_paths:
         return diff
-    render_workspace_plan(current, prepared)
-    _validate_workspace_plan(root, diff)
     with workspace_mutation_lock(root):
+        render_workspace_plan(current, prepared)
+        _validate_workspace_plan(root, diff)
         fresh = load_workspace(root)
         fresh_files = fresh.get("files") or {}
         current_files = current.get("files", {}) if isinstance(current, dict) else {}

@@ -288,8 +288,7 @@ def test_explicit_dry_run_plan_matches_equivalent_real_write_bytes(tmp_path, cap
         for path in tmp_path.rglob("*")
         if path.is_file() and ".agent" not in path.relative_to(tmp_path).parts
     }
-    non_agent_files.discard(".aef-workspace-mutation.lock")
-    assert non_agent_files == {"project-owned.txt"}
+    assert non_agent_files == {"project-owned.txt", ".gitignore"}
 
     replay_code, replay, _ = invoke(capsys, *init_args(tmp_path, "--dry-run"))
     assert replay_code == 0

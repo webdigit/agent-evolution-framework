@@ -173,17 +173,16 @@ def plan_ingest(
     """Validate intake and project knowledge. Write only when dry_run is false."""
     intake = validate_ingest_submission(document)
     root = Path(root).resolve()
-    preview = load_workspace(root)
-    preview_files = preview.get("files") if isinstance(preview, dict) else None
-    if (
-        not isinstance(preview_files, dict)
-        or MANIFEST_PATH not in preview_files
-        or KNOWLEDGE_PATH not in preview_files
-    ):
-        _require_initialized(preview)
 
     with workspace_mutation_lock(root):
         current = load_workspace(root)
+        preview_files = current.get("files") if isinstance(current, dict) else None
+        if (
+            not isinstance(preview_files, dict)
+            or MANIFEST_PATH not in preview_files
+            or KNOWLEDGE_PATH not in preview_files
+        ):
+            _require_initialized(current)
         _guard_transactions(root, current)
         knowledge = deepcopy(_require_initialized(current))
         record_ids = [citation["record_id"] for citation in intake["records"]]

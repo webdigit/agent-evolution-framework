@@ -24,6 +24,7 @@ from .filesystem import (
     UpgradeRecoveryRequiredError,
     WorkspaceContentionError,
     apply_workspace,
+    ensure_workspace_gitignore,
     load_workspace,
     plan_workspace,
 )
@@ -1170,6 +1171,8 @@ def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     diff = plan_workspace(current, desired)
     if not args.dry_run and status in {"CHANGE", "NO_CHANGE"}:
         diff = apply_workspace(workspace, current, desired)
+        if status == "CHANGE":
+            ensure_workspace_gitignore(workspace)
     envelope = _envelope(
         command="INIT",
         workspace=workspace,
