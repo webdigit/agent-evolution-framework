@@ -34,10 +34,13 @@ jobs:
         run: |
           set -o pipefail
           python tests/adversarial/lance-tout.py 2>&1 | tee banc-output.txt
-      - name: Upload banc output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: banc-output
-          path: banc-output.txt
-          if-no-files-found: error
+          # actions/upload-artifact is not on the repo allowlist
+          # (only checkout@v4 and setup-python@v5). The complete
+          # output is in this job log; tee keeps a local copy.
+          {
+            echo "## Banc output"
+            echo '```'
+            tail -c 200000 banc-output.txt
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
