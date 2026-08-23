@@ -272,6 +272,24 @@ def recover_evaluation_transaction(root, current, *, dry_run=False):
         return "NO_CHANGE", deepcopy(current), {
             "reason": None, "transaction_id": None, "action": "none",
         }
+    from .competency_declaration_transaction import (
+        declaration_transaction_entry_present,
+        declaration_transaction_present,
+    )
+    from .upgrade_transaction import (
+        upgrade_transaction_entry_present,
+        upgrade_transaction_present,
+    )
+    if upgrade_transaction_present(current) or upgrade_transaction_entry_present(root):
+        return "BLOCKED", deepcopy(current), {
+            "reason": "upgrade_recovery_required",
+            "transaction_id": None, "action": "none",
+        }
+    if declaration_transaction_present(current) or declaration_transaction_entry_present(root):
+        return "BLOCKED", deepcopy(current), {
+            "reason": "competency_declaration_recovery_required",
+            "transaction_id": None, "action": "none",
+        }
     validate_evaluation_transaction(journal)
     states = []
     for entry in journal["files"]:

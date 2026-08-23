@@ -14,6 +14,7 @@ from aef.competency_declaration import (
     projected_l1_entry,
     resolve_declaration_outcome,
     validate_competency_declaration,
+    validate_ledger,
 )
 
 
@@ -48,7 +49,8 @@ def sample_declaration(**overrides):
         ({"decision": {"source": "agent", "actor": "x", "decided_at": "2026-08-21T10:00:00Z", "approved": True}}, "invalid_declaration"),
         ({"decision": {"source": "human", "actor": "", "decided_at": "2026-08-21T10:00:00Z", "approved": True}}, "invalid_declaration"),
         ({"decision": {"source": "human", "actor": "op", "decided_at": "not-a-date", "approved": True}}, "invalid_human_decision"),
-        ({"xp": 10}, "invalid_declaration"),
+        ({"xp": 10}, "invalid_declaration_authority"),
+        ({"level": "L2"}, "invalid_initial_level"),
         ({"records": []}, "invalid_declaration"),
     ],
 )
@@ -121,13 +123,18 @@ def test_divergent_existing_competency_is_blocked():
     assert exc.value.code == "competency_conflict"
 
 
-def test_casefold_collision_is_blocked():
-    assert competency_id_collides("Dry-Run", ["dry-run"]) == "dry-run"
-    document = validate_competency_declaration(sample_declaration(competency_id="Dry-Run"))
+def test_case_and_unicode_collision_matrix():
+    cafe_nfc = "Café"
+    cafe_nfd = "Cafe\u0301"
+    assert competency_id_collides("café", [cafe_nfc]) == cafe_nfc
+    assert competency_id_collides(cafe_nfd, [cafe_nfc]) == cafe_nfc
+    assert competency_id_collides("CAFÉ", [cafe_nfc]) == cafe_nfc
+    assert competency_id_collides(cafe_nfd.casefold(), [cafe_nfc]) == cafe_nfc
+    document = validate_competency_declaration(sample_declaration(competency_id="café"))
     with pytest.raises(CompetencyDeclarationBlockedError) as exc:
         resolve_declaration_outcome(
             document,
-            {"dry-run": {"id": "dry-run", "level": "L1", "xp": 0, "trust": None}},
+            {cafe_nfc: {"id": cafe_nfc, "level": "L1", "xp": 0, "trust": None}},
             empty_ledger(),
         )
     assert exc.value.code == "competency_id_collision"
@@ -157,3 +164,31 @@ def test_declaration_digest_is_stable():
     document = validate_competency_declaration(sample_declaration())
     assert declaration_digest(document) == declaration_digest(document)
     assert declaration_digest(document).startswith("sha256:")
+
+
+def test_far_future_decided_at_is_rejected():
+    document = sample_declaration()
+    document["decision"] = {
+        "source": "human",
+        "actor": "operator",
+        "decided_at": "3999-01-01T00:00:00Z",
+        "approved": True,
+    }
+    with pytest.raises(InvalidCompetencyDeclarationError) as exc:
+        validate_competency_declaration(document)
+    assert exc.value.code == "invalid_human_decision"
+
+
+def test_duplicate_ledger_events_are_rejected():
+    event = {
+        "event_id": "competency-declaration:deadbeef",
+        "competency_id": "dry-run-review",
+        "declared_at": "2026-08-21T10:00:00Z",
+        "title": "Dry-run review",
+    }
+    with pytest.raises(InvalidCompetencyDeclarationError) as exc:
+        validate_ledger({
+            "protocol": "aef.competency-declarations/v1",
+            "events": [event, dict(event)],
+        })
+    assert exc.value.code == "invalid_declaration_ledger"

@@ -33,6 +33,7 @@ from .competency_declaration_transaction import (
 from .competency_learning import ensure_competency
 from .filesystem import (
     _apply_workspace_unchecked,
+    _evaluation_transaction_entry_present,
     is_link_or_reparse_point,
     load_workspace,
     plan_workspace,
@@ -71,17 +72,21 @@ def _require_initialized(current: dict[str, Any]) -> dict[str, Any]:
     return competencies
 
 
-def _guard_transactions(root: Path, current: dict[str, Any]) -> None:
+def _guard_foreign_transactions(root: Path, current: dict[str, Any]) -> None:
     if upgrade_transaction_present(current) or upgrade_transaction_entry_present(root):
         _blocked(
             "upgrade_recovery_required",
             "upgrade recovery is required before workspace mutation",
         )
-    if evaluation_recovery_required(current):
+    if evaluation_recovery_required(current) or _evaluation_transaction_entry_present(root):
         _blocked(
             "evaluation_recovery_required",
             "evaluation recovery is required before workspace mutation",
         )
+
+
+def _guard_transactions(root: Path, current: dict[str, Any]) -> None:
+    _guard_foreign_transactions(root, current)
     if declaration_transaction_present(current) or declaration_transaction_entry_present(root):
         _blocked(
             "competency_declaration_recovery_required",
@@ -120,6 +125,12 @@ def _load_persisted_records(
         competencies_path,
         code="competency_target_unsafe",
         message="the competencies path is not a regular file.",
+    )
+    ledger_path = root.joinpath(*LEDGER_PATH.split("/"))
+    _reject_exterior_link(
+        ledger_path,
+        code="competency_target_unsafe",
+        message="the declaration ledger path is not a regular file.",
     )
     persisted: dict[str, Any] = {}
     files = current.get("files", {})
@@ -289,6 +300,55 @@ def _apply_declaration_transaction(
     _apply_workspace_unchecked(root, final, cleanup, allow_delete=True)
 
 
+def _parse_journal_content(content: str) -> Any:
+    if content == "":
+        return None
+    try:
+        return json.loads(content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return content
+
+
+def _classify_journal_path(root: Path, entry: dict[str, Any], created_paths: list[str]) -> str:
+    observed = observe_file(root, entry["path"])
+    actual_hash = sha256_text(observed) if observed is not None else None
+    if actual_hash == entry["after_hash"]:
+        return "after"
+    before_match = (
+        (observed is None and entry["path"] in created_paths)
+        or actual_hash == entry["before_hash"]
+    )
+    if before_match:
+        return "before"
+    return "neither"
+
+
+def _desired_from_journal(
+    project: dict[str, Any],
+    journal: dict[str, Any],
+    *,
+    action: str,
+) -> dict[str, Any]:
+    desired = deepcopy(project)
+    files = desired.setdefault("files", {})
+    restore_before = action == "rollback"
+    for entry in journal["files"]:
+        if restore_before:
+            if entry["path"] in journal["created_paths"]:
+                files.pop(entry["path"], None)
+                continue
+            parsed = _parse_journal_content(entry["before_content"])
+            if parsed is None:
+                files.pop(entry["path"], None)
+            else:
+                files[entry["path"]] = parsed
+        else:
+            parsed = _parse_journal_content(entry["after_content"])
+            files[entry["path"]] = parsed
+    files.pop(TRANSACTION_PATH, None)
+    return desired
+
+
 def recover_declaration(
     root: str | Path,
     *,
@@ -315,6 +375,7 @@ def _recover_declaration_locked(
             {"reason": "no_competency_declaration_transaction"},
             {"created": [], "modified": [], "removed": []},
         )
+    _guard_foreign_transactions(root, project)
     try:
         journal = validate_declaration_transaction(raw)
     except (InvalidCompetencyDeclarationTransactionError, TypeError, ValueError):
@@ -323,64 +384,88 @@ def _recover_declaration_locked(
             "the competency declaration transaction is invalid.",
         )
 
-    observations = {}
+    inconsistent: dict[str, Any] | None = None
     for entry in journal["files"]:
-        observations[entry["path"]] = observe_file(root, entry["path"])
-
-    before_ok = all(
-        (observations[entry["path"]] is None and entry["path"] in journal["created_paths"])
-        or (
-            observations[entry["path"]] is not None
-            and sha256_text(observations[entry["path"]]) == entry["before_hash"]
-        )
-        for entry in journal["files"]
-    )
-    after_ok = all(
-        observations[entry["path"]] is not None
-        and sha256_text(observations[entry["path"]]) == entry["after_hash"]
-        for entry in journal["files"]
-    )
-    if journal["phase"] == "prepared" and (before_ok or after_ok):
-        action = "rollback"
-    elif journal["phase"] == "committed" and after_ok:
-        action = "finalize"
-    else:
+        state = _classify_journal_path(root, entry, journal["created_paths"])
+        if state == "neither":
+            inconsistent = entry
+            break
+    if inconsistent is not None:
         raise CompetencyDeclarationBlockedError(
             "competency_declaration_transaction_inconsistent",
-            "the competency declaration transaction cannot be recovered automatically.",
+            (
+                "the competency declaration transaction cannot be recovered "
+                f"automatically because {inconsistent['path']} matches neither "
+                "the before nor the after image."
+            ),
+            {
+                "path": inconsistent["path"],
+                "expected_before_hash": inconsistent["before_hash"],
+                "expected_after_hash": inconsistent["after_hash"],
+            },
         )
 
+    action = "finalize" if journal["phase"] == "committed" else "rollback"
+    desired = _desired_from_journal(project, journal, action=action)
+    diff = plan_workspace(project, desired)
     result = {
         "recovery_action": action,
         "transaction_id": journal["transaction_id"],
         "human_action_required": False,
     }
     if dry_run:
-        return "CHANGE", result, {}, {"created": [], "modified": [], "removed": []}
+        return "CHANGE", result, {}, diff
 
-    if action == "rollback":
-        restored = deepcopy(project)
-        for entry in journal["files"]:
-            if entry["path"] in journal["created_paths"]:
-                restored.get("files", {}).pop(entry["path"], None)
-            else:
-                try:
-                    parsed = json.loads(entry["before_content"])
-                    restored.setdefault("files", {})[entry["path"]] = parsed
-                except Exception:
-                    restored.setdefault("files", {})[entry["path"]] = entry["before_content"]
-        restored.get("files", {}).pop(TRANSACTION_PATH, None)
-        _apply_workspace_unchecked(root, project, restored, allow_delete=True)
-    else:
-        cleanup = deepcopy(project)
-        cleanup.get("files", {}).pop(TRANSACTION_PATH, None)
-        _apply_workspace_unchecked(root, project, cleanup, allow_delete=True)
-    return (
-        "CHANGE",
-        result,
-        {},
-        {"created": [], "modified": [], "removed": [TRANSACTION_PATH]},
-    )
+    _apply_workspace_unchecked(root, project, desired, allow_delete=True)
+    return "CHANGE", result, {}, diff
+
+
+
+def _history_supports_level(
+    competency_id: str,
+    current_level: str,
+    evaluations: Any,
+) -> bool:
+    if current_level == "L1":
+        return True
+    if not isinstance(evaluations, dict):
+        return False
+    recommendations = [
+        item
+        for item in evaluations.get("promotion_recommendations") or []
+        if isinstance(item, dict) and item.get("competency_id") == competency_id
+    ]
+    by_id = {
+        item["id"]: item
+        for item in recommendations
+        if isinstance(item.get("id"), str)
+    }
+    for decision in evaluations.get("promotion_decisions") or []:
+        if not isinstance(decision, dict):
+            continue
+        recommendation = by_id.get(decision.get("recommendation_id"))
+        if recommendation is None:
+            continue
+        if recommendation.get("to_level") == current_level:
+            return True
+        if decision.get("to_level") == current_level:
+            return True
+    for recommendation in recommendations:
+        if recommendation.get("to_level") == current_level and recommendation.get("status") in {
+            "approved",
+            "applied",
+        }:
+            return True
+    for entry in evaluations.get("history") or []:
+        if not isinstance(entry, dict):
+            continue
+        if (
+            entry.get("result") == "promote"
+            and entry.get("competency_id") == competency_id
+            and entry.get("to_level") == current_level
+        ):
+            return True
+    return False
 
 
 def audit_declaration_provenance(
@@ -394,11 +479,14 @@ def audit_declaration_provenance(
     findings: list[dict[str, str]] = []
     seen: set[str] = set()
 
-    def add(finding_id: str, severity: str) -> None:
-        key = finding_id
+    def add(finding_id: str, severity: str, competency_id: str | None = None) -> None:
+        key = f"{finding_id}:{competency_id or ''}"
         if key not in seen:
             seen.add(key)
-            findings.append({"id": finding_id, "severity": severity})
+            item = {"id": finding_id, "severity": severity}
+            if competency_id is not None:
+                item["competency_id"] = competency_id
+            findings.append(item)
 
     if declaration_transaction_present(project) or (
         root is not None and declaration_transaction_entry_present(root)
@@ -443,34 +531,41 @@ def audit_declaration_provenance(
             if isinstance(key, str) and isinstance(value, dict)
         }
 
+    evaluations = files.get(".agent/state/evaluations.json")
     for competency_id, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
         event = events_by_id.get(competency_id)
         if event is None:
-            add("competency-missing-declaration-provenance", "warning")
+            if entry.get("source") == "declared":
+                add("competency-missing-declaration-provenance", "error", competency_id)
             continue
         for citation in event.get("records") or []:
             if not isinstance(citation, dict):
-                add("competency-declaration-record-invalid", "error")
+                add("competency-declaration-record-invalid", "error", competency_id)
                 continue
             record_id = citation.get("record_id")
             digest = citation.get("digest")
             if not isinstance(record_id, str) or not isinstance(digest, str):
-                add("competency-declaration-record-invalid", "error")
+                add("competency-declaration-record-invalid", "error", competency_id)
                 continue
             try:
                 relative = record_relative_path(record_id)
             except InvalidRecordSubmissionError:
-                add("competency-declaration-record-missing", "error")
+                add("competency-declaration-record-missing", "error", competency_id)
                 continue
             stored = files.get(relative)
             if stored is None:
-                add("competency-declaration-record-missing", "error")
+                add("competency-declaration-record-missing", "error", competency_id)
                 continue
             if not isinstance(stored, dict) or stored.get("digest") != digest:
-                add("competency-declaration-record-digest-mismatch", "error")
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("level") != "L1" and event.get("declaration_digest"):
-            # Birth event present but state drifted — still not inventing provenance.
-            pass
+                add("competency-declaration-record-digest-mismatch", "error", competency_id)
+        current_level = entry.get("level")
+        if (
+            isinstance(current_level, str)
+            and current_level != "L1"
+            and entry.get("source") == "declared"
+            and not _history_supports_level(competency_id, current_level, evaluations)
+        ):
+            add("competency-declaration-level-drift", "error", competency_id)
     return findings

@@ -95,7 +95,10 @@ def test_all_inventoried_repository_competency_identifiers_remain_valid():
     assert {validate_competency_id(value) for value in inventoried} == inventoried
 
 
-@pytest.mark.parametrize("competency_id", [" leading", "trailing ", "\tcontrol", "line\nbreak"])
+@pytest.mark.parametrize("competency_id", [
+    " leading", "trailing ", "\tcontrol", "line\nbreak",
+    "dry\u00a0run", "caf\u0435", "review\u200b-skill",
+])
 def test_new_competency_rejects_edge_spaces_and_unicode_controls(competency_id):
     source = expert_agent()
     before = deepcopy(source)

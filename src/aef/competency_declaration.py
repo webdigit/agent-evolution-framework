@@ -59,16 +59,17 @@ def declaration_digest(document: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _identity_key(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
+
+
 def competency_id_collides(candidate: str, existing_ids: list[str]) -> str | None:
     """Return the colliding existing id, if any, without normalizing persisted ids."""
-    candidate_fold = candidate.casefold()
-    candidate_nfc = unicodedata.normalize("NFC", candidate)
+    candidate_key = _identity_key(candidate)
     for existing in existing_ids:
         if existing == candidate:
             continue
-        if existing.casefold() == candidate_fold:
-            return existing
-        if unicodedata.normalize("NFC", existing) == candidate_nfc:
+        if _identity_key(existing) == candidate_key:
             return existing
     return None
 
@@ -131,6 +132,20 @@ def validate_ledger(document: Any) -> dict[str, Any]:
     events = document.get("events")
     if not isinstance(events, list):
         _reject("invalid_declaration_ledger", "events must be an array.")
+    seen_events: dict[str, Any] = {}
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        competency_id = event.get("competency_id")
+        if not isinstance(competency_id, str):
+            continue
+        previous = seen_events.get(competency_id)
+        if previous is not None:
+            _reject(
+                "invalid_declaration_ledger",
+                "duplicate declaration events for the same competency are not allowed.",
+            )
+        seen_events[competency_id] = event
     return deepcopy(document)
 
 
@@ -148,6 +163,9 @@ def _validate_rfc3339(value: Any) -> str:
         raise InvalidCompetencyDeclarationError(
             "invalid_human_decision", "decided_at must be valid RFC 3339."
         ) from exc
+    aware = timestamp if timestamp.tzinfo is not None else timestamp
+    if aware.year > 2100:
+        _reject("invalid_human_decision", "decided_at is outside the accepted time bound.")
     return value
 
 
@@ -161,6 +179,15 @@ def validate_competency_declaration(document: Any) -> dict[str, Any]:
         raise InvalidCompetencyDeclarationError(
             "invalid_declaration", "The declaration document is not strict JSON."
         ) from exc
+    forbidden_level = document.get("level")
+    if forbidden_level is not None and forbidden_level != "L1":
+        _reject("invalid_initial_level", "Only L1 may be declared; other levels are rejected.")
+    for forbidden in ("xp", "trust", "exploration_authority", "permission"):
+        if forbidden in document:
+            _reject(
+                "invalid_declaration_authority",
+                f"{forbidden} is forbidden on a competency declaration.",
+            )
     try:
         schema = load_packaged_schema("competency-declaration-submission.schema.json")
         draft202012_validator(schema).validate(document)
@@ -190,16 +217,6 @@ def validate_competency_declaration(document: Any) -> dict[str, Any]:
     if not isinstance(actor, str) or not actor.strip():
         _reject("invalid_human_decision", "decision.actor must be a non-empty string.")
     _validate_rfc3339(decision.get("decided_at"))
-
-    forbidden_level = document.get("level")
-    if forbidden_level is not None and forbidden_level != "L1":
-        _reject("invalid_initial_level", "Only L1 may be declared; other levels are rejected.")
-    for forbidden in ("xp", "trust", "exploration_authority", "permission"):
-        if forbidden in document:
-            _reject(
-                "invalid_declaration_authority",
-                f"{forbidden} is forbidden on a competency declaration.",
-            )
 
     record_ids: set[str] = set()
     citations = document.get("records")

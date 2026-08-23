@@ -255,6 +255,9 @@ def _human_finding(finding: Any) -> str:
             if isinstance(public_value, str) and public_value:
                 if public_field == "id":
                     public_value = public_value.replace("-", " ")
+                    competency_id = finding.get("competency_id")
+                    if isinstance(competency_id, str) and competency_id:
+                        public_value = f"{public_value} ({competency_id})"
                 return _escape_human_value(public_value)
         return "Unidentified audit finding"
     return "Unidentified audit finding"

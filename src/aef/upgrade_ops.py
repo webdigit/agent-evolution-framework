@@ -9,6 +9,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .competency_declaration_transaction import (
+    declaration_transaction_entry_present,
+    declaration_transaction_present,
+)
 from .filesystem import (
     EVALUATION_TRANSACTION_PATH,
     WorkspacePathError,
@@ -335,6 +339,10 @@ def run_upgrade(
             extra["reason"] = "evaluation_recovery_required"
             extra["meta"] = {"reason": "evaluation_recovery_required"}
             return "BLOCKED", _machine(project, None, compatibility="blocked"), extra
+        if declaration_transaction_present(project) or declaration_transaction_entry_present(root):
+            extra["reason"] = "competency_declaration_recovery_required"
+            extra["meta"] = {"reason": "competency_declaration_recovery_required"}
+            return "BLOCKED", _machine(project, None, compatibility="blocked"), extra
 
         plan = _project_plan(project, registry)
         if plan.status == "BLOCKED":
@@ -490,6 +498,10 @@ def _recover(
         return "NO_CHANGE", _machine(
             project, None, compatibility="current", recovery_action="none",
         ), extra
+    if evaluation_recovery_required(project) or EVALUATION_TRANSACTION_PATH in project.get("files", {}):
+        return _blocked_recover(project, extra, "evaluation_recovery_required")
+    if declaration_transaction_present(project) or declaration_transaction_entry_present(root):
+        return _blocked_recover(project, extra, "competency_declaration_recovery_required")
     try:
         journal = validate_upgrade_transaction(raw)
     except (InvalidUpgradeTransactionError, TypeError, ValueError):

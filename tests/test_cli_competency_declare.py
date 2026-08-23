@@ -263,9 +263,8 @@ def test_audit_brownfield_warning_and_empty_init(tmp_path, capsys):
     code2, envelope2, _ = invoke(capsys, "--json", "--workspace", str(tmp_path), "audit")
     assert code2 == 0
     assert envelope2["status"] == "PASS"
-    assert any(
+    assert not any(
         item["id"] == "competency-missing-declaration-provenance"
-        and item["severity"] == "warning"
         for item in envelope2["result"]["findings"]
     )
 
