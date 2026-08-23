@@ -66,12 +66,18 @@ def main() -> int:
 
     print("=" * 5, "pytest suite + whitespace")
     pytest = subprocess.run(
-        [PY, "-m", "pytest", "-q"],
+        [PY, "-m", "pytest", "-q", "--tb=line"],
         capture_output=True,
         text=True,
         cwd=str(ROOT),
     )
-    print("  " + (pytest.stdout.strip().splitlines() or ["(no output)"])[-1])
+    pytest_lines = (pytest.stdout or pytest.stderr or "").strip().splitlines()
+    if pytest.returncode != 0:
+        print("  --- pytest output (tail) ---")
+        for line in pytest_lines[-40:]:
+            print("  " + line)
+    else:
+        print("  " + (pytest_lines or ["(no output)"])[-1])
     codes["pytest"] = pytest.returncode
     whitespace = subprocess.run(
         [PY, str(ROOT / "scripts" / "check_release_whitespace.py")],
