@@ -354,6 +354,12 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 f"Workspace : {workspace}\n"
                 "Reason    : upgrade recovery required\n"
             )
+        if status == "BLOCKED" and envelope["meta"].get("reason") == "evaluation_recovery_required":
+            return (
+                "[BLOCKED] AEF evaluation recovery is required\n\n"
+                f"Workspace : {workspace}\n"
+                "Reason    : evaluation recovery required\n"
+            )
 
         if command == "INIT":
             if status == "CHANGE":
@@ -937,6 +943,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "manage AGENTS.md plus Claude and Gemini doorbells",
         (
             "Apply, inspect, or remove the shared commun and root doorbells together. "
+            "No door is written if any requested door is blocked. "
             "Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
         ),
     )
@@ -1657,12 +1664,20 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         except ClaudeIntegrationFilesystemError:
             doctrine_error = "missing_aef_doctrine"
 
-    doors = (
+    requested = (
         ["agents", "claude", "gemini"] if args.integration == "all"
         else [args.integration]
     )
     if args.remove and args.integration == "all":
-        doors = ["gemini", "claude", "agents"]
+        requested = ["gemini", "claude", "agents"]
+    plan_order = list(requested)
+    if (
+        not args.status_only
+        and not args.remove
+        and args.integration in {"claude", "gemini"}
+        and "agents" not in plan_order
+    ):
+        plan_order = ["agents", *plan_order]
 
     aggregate_status = "NO_CHANGE"
     aggregate_diff = {"created": [], "modified": [], "removed": []}
@@ -1676,8 +1691,7 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 if path not in aggregate_diff[key]:
                     aggregate_diff[key].append(path)
 
-    def _apply_one(door: str) -> tuple[str, dict[str, Any]]:
-        nonlocal aggregate_status, primary_installed, last_meta
+    def _plan_one(door: str) -> dict[str, Any]:
         try:
             if door == "claude":
                 root_existing = read_guidance_file(workspace, door_path("claude"))
@@ -1686,121 +1700,163 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                     current, root_existing, legacy_existing,
                     remove=args.remove, status_only=args.status_only,
                 )
+                if meta.get("target") == "legacy_bridge":
+                    existing = legacy_existing
+                    relative = CLAUDE_BRIDGE_PATH
+                else:
+                    existing = root_existing
+                    relative = meta.get("bridge_path") or door_path("claude")
             else:
                 existing = read_guidance_file(workspace, door_path(door))
                 status, _, meta = plan_door_integration(
                     current, existing, door=door,
                     remove=args.remove, status_only=args.status_only,
                 )
+                relative = meta.get("bridge_path") or door_path(door)
         except (GuidanceFilesystemError, ClaudeIntegrationFilesystemError) as exc:
             raise CLIInputError(
                 "invalid_guidance_file",
                 "A guidance instruction file is invalid.",
             ) from exc
 
-        if doctrine_error is not None and not args.status_only:
+        if doctrine_error is not None:
             status = "BLOCKED"
             meta = {
                 **meta, "reason": doctrine_error, "doctrine_files": 0,
                 "bridge_healthy": False, "workspace_compatible": False,
             }
-        elif doctrine_error is not None and args.status_only:
-            meta = {
-                **meta, "reason": doctrine_error, "doctrine_files": 0,
-                "bridge_healthy": False, "workspace_compatible": False,
-            }
-            status = "BLOCKED"
 
         desired_bytes = meta.get("desired_bytes")
-        relative = meta.get("bridge_path") or door_path(door)
-        existing_for_diff: bytes | None
+        empty = {"created": [], "modified": [], "removed": []}
         if door == "claude" and meta.get("target") == "legacy_bridge":
-            existing_for_diff = read_claude_bridge(workspace)
-            relative = CLAUDE_BRIDGE_PATH
             diff = (
-                claude_bridge_diff(existing_for_diff, desired_bytes)
-                if status == "CHANGE" else {"created": [], "modified": [], "removed": []}
+                claude_bridge_diff(existing, desired_bytes)
+                if status == "CHANGE" else empty
             )
         else:
-            existing_for_diff = read_guidance_file(workspace, relative)
             diff = (
-                guidance_diff(relative, existing_for_diff, desired_bytes)
+                guidance_diff(relative, existing, desired_bytes)
                 if status == "CHANGE" and desired_bytes is not None
-                else {"created": [], "modified": [], "removed": []}
+                else empty
             )
-
-        if status == "CHANGE" and not args.dry_run and not args.status_only:
-            if door == "claude" and meta.get("target") == "legacy_bridge":
-                diff = apply_claude_bridge(workspace, existing_for_diff, desired_bytes)
-            else:
-                diff = apply_guidance_file(
-                    workspace, relative, existing_for_diff, desired_bytes,
-                )
-
-        if status == "CHANGE":
-            aggregate_status = "CHANGE"
-            _merge_diff(diff)
-        elif status == "BLOCKED" and aggregate_status != "CHANGE":
-            aggregate_status = "BLOCKED"
-
-        installed = meta.get("bridge", {}).get("state") == "installed"
-        if door == "claude" and meta.get("legacy_bridge", {}).get("state") == "installed":
-            installed = installed or True
-        if args.remove and status == "CHANGE":
-            installed = False
-        elif not args.remove and status == "CHANGE":
-            installed = True
-        if installed:
-            primary_installed = True
-
-        door_results[door] = {
+        return {
+            "door": door,
             "status": status,
-            "path": relative,
-            "bridge": meta.get("bridge"),
-            "legacy_bridge": meta.get("legacy_bridge"),
-            "reason": meta.get("reason"),
-            "installed": installed,
+            "meta": meta,
+            "existing": existing,
+            "relative": relative,
+            "diff": diff,
+            "desired_bytes": desired_bytes,
         }
-        last_meta = meta
-        return status, meta
 
-    # Co-install AGENTS.md before doorbells on install (not status/remove).
-    if (
-        not args.status_only
-        and not args.remove
-        and args.integration in {"claude", "gemini", "all"}
-    ):
-        agents_existing = read_guidance_file(workspace, AGENTS_PATH)
-        agents_status, _, agents_meta = plan_door_integration(
-            current, agents_existing, door="agents",
-        )
-        if doctrine_error is None and agents_status == "CHANGE":
-            agents_diff = guidance_diff(
-                AGENTS_PATH, agents_existing, agents_meta["desired_bytes"],
-            )
-            if not args.dry_run:
-                apply_guidance_file(
-                    workspace, AGENTS_PATH, agents_existing, agents_meta["desired_bytes"],
-                )
-            aggregate_status = "CHANGE"
-            _merge_diff(agents_diff)
-            door_results["agents"] = {
-                "status": "CHANGE",
-                "path": AGENTS_PATH,
-                "bridge": agents_meta.get("bridge"),
-                "installed": True,
-                "co_installed": True,
-            }
+    planned = [_plan_one(door) for door in plan_order]
+    any_blocked = any(item["status"] == "BLOCKED" for item in planned)
+    allow_write = (
+        not args.dry_run and not args.status_only and not any_blocked
+    )
+    if any_blocked:
+        aggregate_status = "BLOCKED"
+    elif any(item["status"] == "CHANGE" for item in planned):
+        aggregate_status = "CHANGE"
 
-    for door in doors:
+    def _door_installed(item: dict[str, Any]) -> bool:
+        meta = item["meta"]
+        status = item["status"]
+        root_state = (meta.get("bridge") or {}).get("state")
+        installed = root_state == "installed"
+        if item["door"] == "claude":
+            legacy_state = (meta.get("legacy_bridge") or {}).get("state")
+            if root_state == "installed":
+                installed = True
+            elif root_state == "absent" and legacy_state == "installed":
+                installed = True
+            else:
+                installed = False
+        if args.remove and status == "CHANGE":
+            return False
+        if not args.remove and status == "CHANGE":
+            return not any_blocked
+        return installed
+
+    def _door_healthy(item: dict[str, Any]) -> bool:
+        if item["status"] == "BLOCKED":
+            return False
+        state = (item["meta"].get("bridge") or {}).get("state")
+        if state == "installed":
+            return True
+        if item["door"] == "claude":
+            legacy = (item["meta"].get("legacy_bridge") or {}).get("state")
+            if state == "absent" and legacy == "installed":
+                return True
+        if not args.remove and item["status"] == "CHANGE" and not any_blocked:
+            return True
+        return False
+
+    for item in planned:
+        if item["status"] == "CHANGE" and not any_blocked:
+            if allow_write:
+                if (
+                    item["door"] == "claude"
+                    and item["meta"].get("target") == "legacy_bridge"
+                ):
+                    item["diff"] = apply_claude_bridge(
+                        workspace, item["existing"], item["desired_bytes"],
+                    )
+                else:
+                    item["diff"] = apply_guidance_file(
+                        workspace, item["relative"],
+                        item["existing"], item["desired_bytes"],
+                    )
+            _merge_diff(item["diff"])
+
+        installed = _door_installed(item)
+        extra: dict[str, Any] = {}
         if (
-            not args.remove
-            and not args.status_only
-            and door == "agents"
-            and door_results.get("agents", {}).get("co_installed")
+            item["door"] == "agents"
+            and item["door"] not in requested
+            and item["status"] == "CHANGE"
+            and not any_blocked
         ):
-            continue
-        _apply_one(door)
+            extra["co_installed"] = True
+        report = (
+            item["door"] in requested
+            or extra.get("co_installed")
+            or item["status"] == "BLOCKED"
+        )
+        if report:
+            door_results[item["door"]] = {
+                "status": item["status"],
+                "path": item["relative"],
+                "bridge": item["meta"].get("bridge"),
+                "legacy_bridge": item["meta"].get("legacy_bridge"),
+                "reason": item["meta"].get("reason"),
+                "installed": installed,
+                **extra,
+            }
+            if installed and item["door"] in requested:
+                primary_installed = True
+        last_meta = item["meta"]
+
+    blocked_meta = next(
+        (item["meta"] for item in planned if item["status"] == "BLOCKED"),
+        last_meta,
+    )
+    last_meta = blocked_meta or last_meta
+    last_meta = {
+        **last_meta,
+        "bridge_healthy": (
+            not any_blocked
+            and all(
+                _door_healthy(item)
+                for item in planned
+                if item["door"] in requested or item["status"] == "BLOCKED"
+            )
+        ),
+        "workspace_compatible": not any_blocked and all(
+            item["meta"].get("workspace_compatible", True)
+            for item in planned if item["door"] in requested
+        ),
+    }
 
     warnings = _claude_settings_warnings(workspace) if args.status_only else []
     audit = audit_project(current, root=workspace) if args.status_only else None
@@ -2062,10 +2118,20 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         details = {}
         exit_code = 3
     elif isinstance(exc, EvaluationRecoveryRequiredError):
-        code = "evaluation_recovery_required"
-        message = "Evaluation recovery is required before workspace mutation."
-        details = {}
-        exit_code = 4
+        command_name = args.command.upper()
+        if args.command == "competency":
+            command_name = "COMPETENCY_DECLARE"
+        envelope = _envelope(
+            command=command_name,
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": "evaluation_recovery_required"},
+            diff=None,
+        )
+        return envelope, 4
     elif isinstance(exc, UpgradeRecoveryRequiredError):
         envelope = _envelope(
             command=args.command.upper(),
@@ -2090,14 +2156,14 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
             diff=None,
         )
         return envelope, 5
-    elif isinstance(exc, ClaudeIntegrationFilesystemError):
-        code = "claude_integration_filesystem_error"
-        message = "The Claude project integration could not be written safely."
-        details = {}
-        exit_code = 6
     elif isinstance(exc, GuidanceFilesystemError):
         code = "guidance_filesystem_error"
         message = "The guidance integration could not be written safely."
+        details = {}
+        exit_code = 6
+    elif isinstance(exc, ClaudeIntegrationFilesystemError):
+        code = "claude_integration_filesystem_error"
+        message = "The Claude project integration could not be written safely."
         details = {}
         exit_code = 6
     elif isinstance(exc, (json.JSONDecodeError, UnicodeError)):

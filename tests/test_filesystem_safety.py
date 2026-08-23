@@ -606,9 +606,11 @@ def test_fail_closed_transaction_entry_has_stable_cli_output(
     assert not (tmp_path / ".agent/manifest.json").exists()
     assert not list(tmp_path.rglob("*.tmp"))
     if mode == "human":
-        assert "Evaluation recovery is required before workspace mutation." in completed.stdout
+        assert "evaluation recovery is required" in completed.stdout.lower()
     else:
         envelope = json.loads(completed.stdout)
-        assert envelope["error"]["code"] == "evaluation_recovery_required"
+        assert envelope["status"] == "BLOCKED"
+        assert envelope["error"] is None
+        assert envelope["meta"]["reason"] == "evaluation_recovery_required"
         if mode == "compact":
             assert completed.stdout.count("\n") == 1

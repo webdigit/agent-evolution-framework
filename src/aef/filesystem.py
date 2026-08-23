@@ -420,6 +420,27 @@ def is_link_or_reparse_point(path: Path) -> bool:
 _is_link_or_reparse_point = is_link_or_reparse_point
 
 
+def file_is_readonly(path: Path) -> bool:
+    """True when an existing path must not be replaced (matches upgrade_ops)."""
+    if not path.exists():
+        return False
+    if is_link_or_reparse_point(path):
+        return True
+    if not os.access(path, os.W_OK):
+        return True
+    try:
+        if not (path.stat().st_mode & stat.S_IWRITE):
+            return True
+    except OSError:
+        return True
+    return False
+
+
+def copy_file_mode(source: Path, destination: Path) -> None:
+    """Copy POSIX permission bits from an existing file onto a replacement."""
+    os.chmod(destination, stat.S_IMODE(source.stat().st_mode))
+
+
 def validate_workspace_rel_path(rel_path: str) -> tuple[str, ...]:
     """Validate one canonical POSIX relative path confined below ``.agent/``.
 

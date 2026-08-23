@@ -71,8 +71,11 @@ aef integrate claude --dry-run
 Status is read-only. It reports guidance health separately from AEF audit
 health. Malformed unmanaged Claude settings are warnings and are never
 repaired. Health of guidance doors is reported here, not by `aef audit`
-(which stays centered on `.agent/`). An incomplete EVALUATE transaction blocks
-installation and removal, but does not block status.
+(which stays centered on `.agent/`). A hand-edited managed block is `BLOCKED`
+on `--status`; `aef audit` still returns `PASS` with no findings for that
+drift — that is the V1 contract (A5), not a detection gap. An incomplete
+EVALUATE transaction blocks installation and removal, but does not block
+status.
 
 Replay of an identical installed segment returns `NO_CHANGE`.
 

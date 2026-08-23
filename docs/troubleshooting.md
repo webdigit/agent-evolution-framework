@@ -87,8 +87,14 @@ aef integrate claude --status
 ```
 
 Do not hand-edit the managed markers. A modified, duplicate, incomplete, or
-unknown-version segment is preserved and blocks writes. Unmanaged Claude
-settings warnings do not get repaired by AEF.
+unknown-version segment is preserved and blocks writes. Detect that drift with
+`aef integrate <door> --status` (status `BLOCKED`). `aef audit` does not
+inspect those segments and will stay `PASS`. Unmanaged Claude settings
+warnings do not get repaired by AEF.
+
+A marker quoted inside a markdown fence (`` ``` `` or `~~~`) or a four-space
+indented code block is documentation, not an installation. `--remove` must not
+strip those quoted bytes.
 
 ## Remove Claude guidance
 

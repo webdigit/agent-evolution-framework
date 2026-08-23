@@ -10,6 +10,7 @@ from .claude_integration import (
     inspect_managed_bridge,
     validate_claude_integration_workspace,
 )
+from .markdown_code import classify_managed_markers, place_managed_segment
 from .transaction_guard import mutation_guard_metadata
 
 
@@ -91,42 +92,12 @@ def inspect_managed_segment(
     catalog: dict[str, bytes],
 ) -> dict[str, Any]:
     """Classify one managed segment without normalizing surrounding bytes."""
-    if existing is None or existing == b"":
-        return {"state": "absent", "version": None, "start": None, "end": None}
-    begin_count = existing.count(begin_prefix)
-    end_count = existing.count(end_marker)
-    if begin_count == 0 and end_count == 0:
-        return {"state": "absent", "version": None, "start": None, "end": None}
-    if begin_count != 1 or end_count != 1:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    begin = existing.index(begin_prefix)
-    end_pos = existing.index(end_marker)
-    if end_pos < begin:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    line_end = existing.find(b" -->", begin)
-    if line_end < 0 or line_end > existing.find(b"\n", begin):
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    version_raw = existing[begin + len(begin_prefix):line_end]
-    if len(version_raw) < 2 or version_raw[:1] != b'"' or version_raw[-1:] != b'"':
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    try:
-        version = version_raw[1:-1].decode("ascii")
-    except UnicodeDecodeError:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    body_end = end_pos + len(end_marker)
-    if existing[body_end:body_end + 1] == b"\n":
-        body_end += 1
-    start = begin
-    if begin >= 2 and existing[begin - 2:begin] == b"\n\n":
-        start = begin - 2
-    expected = catalog.get(version)
-    if expected is None:
-        state = "unsupported_version"
-    elif existing[begin:body_end] != expected:
-        state = "modified"
-    else:
-        state = "installed"
-    return {"state": state, "version": version, "start": start, "end": body_end}
+    return classify_managed_markers(
+        existing,
+        begin_prefix=begin_prefix,
+        end_marker=end_marker,
+        catalog=catalog,
+    )
 
 
 def inspect_door(door: str, existing: bytes | None) -> dict[str, Any]:
@@ -220,10 +191,7 @@ def plan_door_integration(
         }
     if inspection["state"] == "installed":
         return "NO_CHANGE", deepcopy(project), {**base, "reason": None}
-    if not existing:
-        desired = spec["bytes"]
-    else:
-        desired = existing + b"\n\n" + spec["bytes"]
+    desired = place_managed_segment(existing, spec["bytes"])
     return "CHANGE", deepcopy(project), {
         **base, "reason": None, "desired_bytes": desired,
         "integration_version": GUIDANCE_VERSION,

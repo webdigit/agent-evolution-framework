@@ -278,10 +278,6 @@ def test_fsync_failure_returns_public_filesystem_error_without_success(
 
     assert code == 6
     assert envelope["status"] == "ERROR"
-    assert envelope["error"]["code"] in {
-        "claude_integration_filesystem_error",
-        "filesystem_error",
-        "guidance_filesystem_error",
-    }
+    assert envelope["error"]["code"] == "guidance_filesystem_error"
     assert "secret fsync detail" not in captured.out + captured.err
     assert not list(root.rglob(".aef-guidance-*.tmp"))

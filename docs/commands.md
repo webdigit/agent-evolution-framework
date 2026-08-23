@@ -33,7 +33,9 @@ exit code 1. After an ingest, AUDIT also checks record ↔ knowledge provenance.
 A workspace that never ingested remains valid. After a competency declaration,
 AUDIT checks declaration provenance; a competency present without a birth
 event is a non-blocking warning. An empty `competencies.json` (`{}`) is not a
-finding.
+finding. AUDIT does not inspect managed guidance segments in `AGENTS.md`,
+`CLAUDE.md`, or `GEMINI.md`. Hand-edits of those blocks are reported by
+`aef integrate … --status` as `BLOCKED`, not as AUDIT findings.
 
 ## RECORD
 
@@ -102,6 +104,12 @@ of readable rules (citations to `.agent/core/` and `docs/runtime.md`).
 `integrate claude` remains stable; it installs the root doorbell and does not
 create a new `.claude/CLAUDE.md` bridge. An existing brownfield bridge is
 reported by `--status` and never rewritten silently.
+
+`integrate all` is atomic across doors: if any requested door is `BLOCKED`,
+no door is written (exit 4). A quoted marker inside a markdown fence or a
+four-space indented block is not a marker; documenting a doorbell in a project's
+own README-style fence is the nominal case and must not classify as installed
+or be stripped by `--remove`.
 
 Guidance only — not permission, hooks, or host settings. See
 [Claude and agent guidance](claude-integration.md).

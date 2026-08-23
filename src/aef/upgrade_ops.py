@@ -56,9 +56,6 @@ from .upgrade_transaction import (
 )
 
 
-BOOTSTRAP_NAMES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
-
-
 class UpgradeBlocked(Exception):
     def __init__(self, reason: str):
         self.reason = reason
@@ -156,15 +153,6 @@ def _preflight_paths(root: Path, paths: list[str], current_files: dict[str, Any]
             raise UpgradeBlocked("managed_file_not_replaceable")
         if target.exists() and is_link_or_reparse_point(target):
             raise UpgradeBlocked("workspace_path_unsafe")
-
-
-def _preserve_bootstrap(root: Path, desired: dict[str, Any], current: dict[str, Any]) -> None:
-    for name in BOOTSTRAP_NAMES:
-        path = root / name
-        if path.exists():
-            continue
-        if name in desired.get("files", {}) or name in current.get("files", {}):
-            raise UpgradeBlocked("bootstrap_create_forbidden")
 
 
 def _machine(
@@ -365,7 +353,6 @@ def run_upgrade(
             extra["meta"] = {"reason": bound}
             return "BLOCKED", _machine(project, plan, compatibility="blocked"), extra
         _preflight_paths(root, paths, project.get("files", {}))
-        _preserve_bootstrap(root, desired, project)
         journal = _journal_from_states(project, desired, plan, sorted(paths))
         result = _machine(
             project, plan, compatibility="upgrade_required",

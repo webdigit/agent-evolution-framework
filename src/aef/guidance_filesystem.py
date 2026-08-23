@@ -12,6 +12,8 @@ from .claude_filesystem import ClaudeIntegrationFilesystemError, validate_claude
 from .filesystem import (
     EvaluationRecoveryRequiredError,
     _evaluation_transaction_entry_present,
+    copy_file_mode,
+    file_is_readonly,
 )
 from .guidance_integration import DOOR_SPECS
 
@@ -183,6 +185,10 @@ def apply_guidance_file(
                     raise
         if read_guidance_file(root, relative) != existing:
             raise GuidanceFilesystemError("guidance file changed before replace")
+        if target.exists() and file_is_readonly(target):
+            raise GuidanceFilesystemError("guidance file is not replaceable")
+        if target.exists():
+            copy_file_mode(target, temporary)
         os.replace(temporary, target)
         temporary = None
         published = True
