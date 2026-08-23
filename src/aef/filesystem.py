@@ -68,7 +68,15 @@ class WorkspaceContentionError(RuntimeError):
 
 
 _WORKSPACE_LOCK_STATE = threading.local()
-WORKSPACE_MUTATION_LOCK_PATH = ".aef-workspace-mutation.lock"
+WORKSPACE_MUTATION_LOCK_PATH = ".agent/state/.workspace-mutation.lock"
+WORKSPACE_MUTATION_LOCK_FALLBACK_PATH = ".aef-workspace-mutation.lock"
+WORKSPACE_INTERNAL_PATHS = frozenset({WORKSPACE_MUTATION_LOCK_PATH})
+
+
+def _workspace_mutation_lock_path(root: Path) -> Path:
+    if (root / ".agent").is_dir():
+        return root / WORKSPACE_MUTATION_LOCK_PATH
+    return root / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
 
 
 @contextlib.contextmanager
@@ -79,7 +87,13 @@ def workspace_mutation_lock(root: str | Path):
     if held == resolved:
         yield
         return
-    lock_path = resolved / WORKSPACE_MUTATION_LOCK_PATH
+    lock_path = _workspace_mutation_lock_path(resolved)
+    fallback_path = resolved / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+    if lock_path != fallback_path and fallback_path.is_file():
+        try:
+            fallback_path.unlink()
+        except OSError:
+            pass
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     try:
@@ -292,6 +306,8 @@ def load_workspace(root: str | Path) -> dict[str, Any]:
 
     for path in sorted(p for p in agent_dir.rglob("*") if p.is_file()):
         rel = _relative_posix(path, root)
+        if rel in WORKSPACE_INTERNAL_PATHS:
+            continue
         raw = path.read_text(encoding="utf-8")
 
         if rel in JSON_PATHS or path.suffix.lower() == ".json":
@@ -666,6 +682,8 @@ def apply_workspace(
         mutation_paths.update(diff["removed"])
     if not mutation_paths:
         return diff
+    render_workspace_plan(current, prepared)
+    _validate_workspace_plan(root, diff)
     with workspace_mutation_lock(root):
         fresh = load_workspace(root)
         fresh_files = fresh.get("files") or {}

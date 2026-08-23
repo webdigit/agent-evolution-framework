@@ -23,6 +23,7 @@ from .ingest_intake import (
     merge_existing_source_records,
     validate_ingest_submission,
 )
+from .knowledge import EvidenceCapExceededError
 from .learning_engine import ingest_events
 from .record_document import (
     InvalidPersistedRecordError,
@@ -172,6 +173,15 @@ def plan_ingest(
     """Validate intake and project knowledge. Write only when dry_run is false."""
     intake = validate_ingest_submission(document)
     root = Path(root).resolve()
+    preview = load_workspace(root)
+    preview_files = preview.get("files") if isinstance(preview, dict) else None
+    if (
+        not isinstance(preview_files, dict)
+        or MANIFEST_PATH not in preview_files
+        or KNOWLEDGE_PATH not in preview_files
+    ):
+        _require_initialized(preview)
+
     with workspace_mutation_lock(root):
         current = load_workspace(root)
         _guard_transactions(root, current)
@@ -181,9 +191,15 @@ def plan_ingest(
         bind_ingest_citations(intake, persisted)
         events = flatten_ingest_events(intake)
         citations = event_citations(intake)
-        _, next_state = ingest_events(knowledge, events)
-        next_state = attach_source_records(next_state, citations)
-        next_state = merge_existing_source_records(knowledge, next_state)
+        try:
+            _, next_state = ingest_events(knowledge, events)
+            next_state = attach_source_records(next_state, citations)
+            next_state = merge_existing_source_records(knowledge, next_state)
+        except EvidenceCapExceededError as exc:
+            _blocked(
+                exc.code,
+                "the evidence id union would exceed the configured cap.",
+            )
         try:
             validate_persisted_knowledge(next_state)
         except Exception as exc:

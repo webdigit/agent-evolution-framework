@@ -36,6 +36,7 @@ from .filesystem import (
     is_link_or_reparse_point,
     load_workspace,
     plan_workspace,
+    workspace_mutation_lock,
 )
 from .record_document import (
     InvalidPersistedRecordError,
@@ -193,6 +194,16 @@ def plan_declare(
     """Validate declaration and project L1 birth. Write only when dry_run is false."""
     declaration = validate_competency_declaration(document)
     root = Path(root).resolve()
+    with workspace_mutation_lock(root):
+        return _plan_declare_locked(root, declaration, dry_run=dry_run)
+
+
+def _plan_declare_locked(
+    root: Path,
+    declaration: dict[str, Any],
+    *,
+    dry_run: bool,
+) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]] | None]:
     current = load_workspace(root)
     _guard_transactions(root, current)
     competencies = deepcopy(_require_initialized(current))
@@ -285,6 +296,15 @@ def recover_declaration(
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]] | None]:
     """Recover an interrupted competency declaration transaction."""
     root = Path(root).resolve()
+    with workspace_mutation_lock(root):
+        return _recover_declaration_locked(root, dry_run=dry_run)
+
+
+def _recover_declaration_locked(
+    root: Path,
+    *,
+    dry_run: bool,
+) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]] | None]:
     project = load_workspace(root)
     files = project.get("files", {})
     raw = files.get(TRANSACTION_PATH)

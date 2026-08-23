@@ -1341,6 +1341,18 @@ def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], i
             diff=None,
         )
         return envelope, _exit_code("COMPETENCY_DECLARE", "BLOCKED")
+    except WorkspaceContentionError as exc:
+        envelope = _envelope(
+            command="COMPETENCY_DECLARE",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code},
+            diff=None,
+        )
+        return envelope, _exit_code("COMPETENCY_DECLARE", "BLOCKED")
     envelope = _envelope(
         command="COMPETENCY_DECLARE",
         workspace=workspace,

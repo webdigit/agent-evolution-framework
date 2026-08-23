@@ -3,6 +3,12 @@ from copy import deepcopy
 MAX_EVIDENCE_IDS = 128
 
 
+class EvidenceCapExceededError(ValueError):
+    """Raised when merging evidence ids would exceed the configured cap."""
+
+    code = "evidence_cap_exceeded"
+
+
 def union_evidence_ids(
     left: list[str] | None,
     right: list[str] | None,
@@ -15,7 +21,11 @@ def union_evidence_ids(
         for item in (left or []) + (right or [])
         if isinstance(item, str) and item
     })
-    return merged[:max_items]
+    if len(merged) > max_items:
+        raise EvidenceCapExceededError(
+            f"evidence id union exceeds cap of {max_items} items",
+        )
+    return merged
 
 
 def upsert_by_id(records, record):

@@ -250,6 +250,8 @@ def test_explicit_dry_run_plan_matches_equivalent_real_write_bytes(tmp_path, cap
         for path in (tmp_path / ".agent").rglob("*")
         if path.is_file()
     }
+    from aef.filesystem import WORKSPACE_INTERNAL_PATHS
+    written_paths -= WORKSPACE_INTERNAL_PATHS
     assert written_paths == planned_paths
     for relative_path, content in rendered.items():
         assert (tmp_path / relative_path).read_bytes() == content.encode("utf-8")
