@@ -116,6 +116,7 @@ The complete syntax, output modes, and exit codes are documented in
 - [Getting started](docs/getting-started.md)
 - [Claude project integration](docs/claude-integration.md)
 - [Command reference](docs/commands.md)
+- [Properties](docs/properties.md)
 - [Canonical input files](docs/input-files.md)
 - [Core concepts](docs/concepts.md)
 - [Evaluation recovery](docs/recovery.md)

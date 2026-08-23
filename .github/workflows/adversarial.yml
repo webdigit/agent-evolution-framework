@@ -1,0 +1,43 @@
+name: Adversarial banc
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  banc:
+    name: Adversarial banc (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: >
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'adversarial')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - name: Setup banc on the current tree
+        run: python tests/adversarial/00-setup.py --current
+      - name: Run banc
+        env:
+          AEF_BUILD: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python tests/adversarial/lance-tout.py 2>&1 | tee banc-output.txt
+      - name: Upload banc output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banc-output
+          path: banc-output.txt
+          if-no-files-found: error

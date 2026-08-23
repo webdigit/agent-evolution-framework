@@ -2,6 +2,7 @@ include CHANGELOG.md
 include COMMERCIAL-LICENSE.md
 include CONTRIBUTING.md
 include SECURITY.md
+recursive-include tests *
 recursive-include docs *.md *.json
 prune docs/prompts
 recursive-exclude docs/prompts *
