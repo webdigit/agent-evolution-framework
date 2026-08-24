@@ -678,6 +678,27 @@ def test_non_tty_evaluate_without_explicit_action_never_prompts(tmp_path):
     assert "Approve / Reject / Later" not in completed.stderr
 
 
+def test_evaluate_without_decisions_does_not_promote(tmp_path):
+    apply_workspace(tmp_path, load_workspace(tmp_path), project(PENDING))
+    career_path = tmp_path / ".agent" / "state" / "career.json"
+    evaluations_path = tmp_path / ".agent" / "state" / "evaluations.json"
+    before_career = career_path.read_bytes()
+    before_evaluations = evaluations_path.read_bytes()
+    before_level = json.loads(before_career.decode("utf-8"))["level"]
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "aef", "--json", "--workspace", str(tmp_path),
+         "evaluate"],
+        input="", capture_output=True, text=True, check=False,
+    )
+
+    assert completed.returncode == 3
+    assert json.loads(completed.stdout)["error"]["code"] == "interactive_input_required"
+    assert career_path.read_bytes() == before_career
+    assert evaluations_path.read_bytes() == before_evaluations
+    assert json.loads(career_path.read_text(encoding="utf-8"))["level"] == before_level == "L1"
+
+
 def test_cli_recover_dry_run_then_application_is_idempotent(tmp_path):
     from aef.evaluation_transaction import TRANSACTION_PATH, apply_evaluation_transaction
 
