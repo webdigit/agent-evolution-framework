@@ -275,3 +275,15 @@ def test_release_artifact_inspector_rejects_wheel_containing_non_runtime_tree(
     _wheel(wheel, extra=[member])
     with pytest.raises(ValueError, match=f"wheel contains {fragment}"):
         inspect_artifact(wheel)
+
+
+def test_verify_artifacts_cli_prints_one_error_line_and_exits_1(tmp_path, capsys):
+    from scripts.verify_artifacts import main
+
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=["tests/test_x.py"])
+    assert main([str(wheel)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: wheel contains tests/\n"
+    assert "Traceback" not in captured.err

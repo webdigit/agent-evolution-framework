@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tarfile
 from pathlib import Path, PurePosixPath
 
@@ -227,7 +228,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args(argv)
-    report = [inspect_artifact(path) for path in args.artifacts]
+    try:
+        report = [inspect_artifact(path) for path in args.artifacts]
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True))
     return 0
 
