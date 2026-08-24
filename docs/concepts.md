@@ -1,5 +1,22 @@
 # Concepts
 
+## A runtime, not a harness plugin
+
+AEF is a program that belongs to one project. It is not a marketplace plugin,
+a hook pack, or a skill library loaded into Claude Code, Cursor, Codex, or any
+other editor.
+
+That distinction is the product. A harness plugin buys convenience inside one
+tool: skills, memory files, and session instincts that the model *may* follow.
+AEF buys guarantees that still hold when the editor changes and when the model
+ignores the prompt. A rule the agent can talk its way around is not a rule.
+
+Python is the vehicle, not the identity. The identity is a CLI that can
+refuse: ingest is bounded, writes contend instead of queueing, equivalent input
+replays as `NO_CHANGE`, and `EVALUATE` never promotes. The interpreter is the
+court, `.agent/` is the docket, and the model is a party — not the judge.
+Guidance (`AGENTS.md`, doorbells) points at that court. It does not replace it.
+
 ## Project-local state
 
 AEF state belongs to one project and lives under `.agent/`. JSON is the

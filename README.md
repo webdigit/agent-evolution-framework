@@ -9,6 +9,14 @@ AEF is useful when you want an agent to improve within explicit boundaries:
 work can produce evidence and promotion recommendations, but authority and
 level changes remain controlled by policy and explicit human decisions.
 
+AEF is a **project runtime**, not an editor plugin. A skill or a hook can
+remind an agent what to do; it cannot refuse a write, cap evidence, replay to
+`NO_CHANGE`, or hold a promotion until a human decides. Those guarantees have
+to survive the next harness and an agent that forgets the skill. That is why
+installation goes through Python: the CLI is the court, `.agent/` is the
+docket, and the model is a party — not the judge. See
+[Concepts](docs/concepts.md#a-runtime-not-a-harness-plugin).
+
 ## Install
 
 AEF V1 requires Python 3.11 or later. Install the tagged source from GitHub

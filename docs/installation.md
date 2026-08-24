@@ -6,6 +6,10 @@ project. Diagnose an existing checkout with `aef doctor` or
 `aef --json doctor` before creating a new environment. See
 [Runtime bootstrap](runtime.md).
 
+Going through Python is intentional. AEF is a project runtime, not an editor
+plugin: the CLI must be able to refuse even when the agent forgets the skill.
+See [Concepts](concepts.md#a-runtime-not-a-harness-plugin).
+
 ## Install from Git
 
 Installing from the tagged repository requires Git.
