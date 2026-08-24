@@ -34,9 +34,17 @@ jobs:
         run: |
           set -o pipefail
           python tests/adversarial/lance-tout.py 2>&1 | tee banc-output.txt
+      - name: Publish banc summary
+        if: always()
+        shell: bash
+        run: |
           # actions/upload-artifact is not on the repo allowlist
           # (only checkout@v4 and setup-python@v5). The complete
           # output is in this job log; tee keeps a local copy.
+          if [ ! -f banc-output.txt ]; then
+            echo "banc-output.txt was not produced" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           {
             echo "## Banc output"
             echo '```'
