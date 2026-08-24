@@ -209,8 +209,10 @@ def _path_for_command(path: Path | str, workspace: Path | None) -> str:
         return candidate.as_posix() if not candidate.is_absolute() else candidate.name
     try:
         return candidate.resolve().relative_to(workspace.resolve()).as_posix()
-    except ValueError:
-        return candidate.name
+    except ValueError as exc:
+        raise ValueError(
+            f"install-command path {candidate} is outside the workspace"
+        ) from exc
 
 
 def proposed_install_command_from_spec(

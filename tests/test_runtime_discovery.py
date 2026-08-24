@@ -19,7 +19,13 @@ from aef.runtime_discovery import (
     interpreter_label,
     read_expected_package_version,
 )
-from aef.runtime_doctor import DOCTOR_RESULT_FIELDS, diagnose_runtime, proposed_install_command_from_spec, resolve_package_install_spec
+from aef.runtime_doctor import (
+    DOCTOR_RESULT_FIELDS,
+    PackageInstallSpec,
+    diagnose_runtime,
+    proposed_install_command_from_spec,
+    resolve_package_install_spec,
+)
 
 
 def write_venv(root: Path, *, kind: str) -> Path:
@@ -259,6 +265,24 @@ def test_proposed_command_quotes_spaces():
     assert "python" in command.lower() or "py -3.11" in command
     assert "venv" in command
     assert "agent_evolution_framework-1.2.0 my wheel.whl" in command or "my" in command
+
+
+def test_install_command_raises_when_wheel_is_outside_workspace(tmp_path):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    wheel = outside / "pkg-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"w")
+    spec = PackageInstallSpec(
+        mode="wheel",
+        pin_version="1.0.0",
+        wheel=wheel,
+        find_links=outside,
+        pip_args=(),
+    )
+    with pytest.raises(ValueError, match="outside the workspace"):
+        proposed_install_command_from_spec(spec, ".aef-venv", workspace=workspace)
 
 
 def test_external_env_is_blocked(tmp_path):
