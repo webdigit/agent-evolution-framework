@@ -44,9 +44,20 @@ def test_forced_add_is_detected(tmp_path):
 
 
 def test_current_repository_has_no_tracked_ignored_paths():
-    assert tracked_ignored_paths(Path(__file__).resolve().parents[1]) == []
+    root = Path(__file__).resolve().parents[1]
+    probe = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        pytest.skip("this tree is not a git work tree")
+    assert tracked_ignored_paths(root) == []
 
 
 def test_ci_runs_the_tracked_ignored_check():
-    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "python scripts/check_tracked_gitignored.py" in workflow
+    workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    if not workflow.is_file():
+        pytest.skip("ci workflow is not in this tree")
+    assert "python scripts/check_tracked_gitignored.py" in workflow.read_text(encoding="utf-8")
