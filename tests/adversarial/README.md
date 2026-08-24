@@ -68,6 +68,7 @@ wired to every push.
 | `11-hygiene-git.py` | the runtime lock appears neither in `git status` nor in history |
 | `12-fence-marqueurs.py` | a marker inside a Markdown fence is not a marker |
 | `13-guidance-integrite.py` | blocked aggregate is atomic, file mode is preserved, no mid-flight overwrite |
+| `14-ecrivain-externe.py` | a non-AEF thread rewriting a governed file is not overwritten behind a reported CHANGE |
 | `decompte.py <before> <after>` | exact decomposition of the pytest delta between two worktrees |
 
 ## Three method rules

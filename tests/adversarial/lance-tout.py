@@ -30,6 +30,7 @@ SCRIPTS = [
     ("11-hygiene-git.py", []),
     ("12-fence-marqueurs.py", []),
     ("13-guidance-integrite.py", []),
+    ("14-ecrivain-externe.py", []),
     ("10-epic3-runtime.py", []),
 ]
 
