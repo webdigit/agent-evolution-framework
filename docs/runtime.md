@@ -68,13 +68,16 @@ If `aef` and `python -m aef` cannot run, or `doctor` returns
 `INSTALL_REQUIRED`, stop. Do not invent workspace state. Do not create, edit,
 or delete files under `.agent/state/`.
 
-Review the `install_command` in the `doctor` result, then run it manually in
-a shell from any working directory — paths are workspace-absolute so the
-target `.aef-venv` is always created beside the project:
+Review the `install_command` in the `doctor` result, then run it manually
+from the workspace root. The command is workspace-relative so it does not
+embed the operator's home directory or the path of the current interpreter.
+The `interpreter` field names the host as a label such as `CPython-3.13`,
+not as a filesystem path:
 
 ```console
 aef --json doctor
-# copy install_command from the JSON result and run it
+# copy install_command from the JSON result and run it from the workspace root
+python -m venv .aef-venv && .aef-venv/bin/python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
 ```
 
 ## Isolated install (manual)
@@ -100,12 +103,13 @@ mode as a convenience hint, not a promise. Otherwise the proposal pins against
 PyPI:
 
 ```console
-python -m venv /path/to/project/.aef-venv
-/path/to/project/.aef-venv/bin/python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
+python -m venv .aef-venv
+.aef-venv/bin/python -m pip install --isolated --no-cache-dir --index-url https://pypi.org/simple "agent-evolution-framework==<pinned-version>"
 ```
 
-On Windows, `py -3.11 -m venv` and `.aef-venv\Scripts\python.exe` are the
-equivalent entry points. The host system interpreter is not the install target.
+On Windows, `python -m venv .aef-venv` and `.aef-venv\Scripts\python.exe` are
+the equivalent entry points. The host system interpreter is not named by path
+in `install_command`; `interpreter` carries the label (`CPython-3.13`).
 
 ## After install
 

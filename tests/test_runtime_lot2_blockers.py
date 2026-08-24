@@ -133,7 +133,7 @@ def test_n4_injection_payload_rejected(tmp_path, capsys):
     assert "PWNED" not in (envelope.get("result") or {}).get("install_command", "")
 
 
-def test_b1_cli_local_wheel_absolute_path_in_proposal(tmp_path, capsys):
+def test_b1_cli_local_wheel_relative_path_in_proposal(tmp_path, capsys):
     write_expected(tmp_path, "9.9.9")
     payload = b"wheel-cli-b1"
     wheel = tmp_path / "agent_evolution_framework-9.9.9-py3-none-any.whl"
@@ -151,5 +151,8 @@ def test_b1_cli_local_wheel_absolute_path_in_proposal(tmp_path, capsys):
     assert code == 8
     proposed = envelope["result"]["install_command"]
     abs_wheel = str(wheel.resolve())
-    assert abs_wheel in proposed or abs_wheel.replace("\\", "/") in proposed.replace("\\", "/")
+    assert wheel.name in proposed
+    assert abs_wheel not in proposed
+    assert abs_wheel.replace("\\", "/") not in proposed.replace("\\", "/")
     assert "--no-index" in proposed
+    assert "--find-links" in proposed

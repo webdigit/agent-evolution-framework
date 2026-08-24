@@ -21,6 +21,7 @@ checks that the guarantee still holds when the input was not expected.
 | 7 | Nothing in the workspace is allowed to consume disproportionate memory or time. Archives are not opened. | `tests/adversarial/10-epic3-runtime.sh`; `tests/test_runtime_confined_reads.py` (`test_dependency_wheel_archive_not_opened`) |
 | 8 | `doctor` asserts only what it observes: no proof of installation, no verification of archive contents — and the documentation says so. | `tests/test_cli_doctor.py`; docs: [Runtime](runtime.md) |
 | 9 | Documented limit: the TOCTOU race on intermediate path components is not closed. An attacker who can rewrite the workspace during `doctor` can also edit `_version.py` directly. | Review only — [Runtime](runtime.md) |
+| 33 | The `doctor` result payload does not contain the operator's home directory. `install_command` is workspace-relative and names the interpreter by label (`CPython-3.13`), not by filesystem path. The CLI envelope `workspace` field remains an absolute identity, as for every other command. | `tests/test_runtime_discovery.py` (`test_diagnose_fields_and_no_home_path`) |
 
 ## Governed writes
 

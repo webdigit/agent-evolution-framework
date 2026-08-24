@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import shlex
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -203,18 +202,32 @@ def _quote_command_part(part: str) -> str:
     return shlex.quote(part)
 
 
+def _path_for_command(path: Path | str, workspace: Path | None) -> str:
+    """Return a workspace-relative posix path, never a home-bearing absolute."""
+    candidate = Path(path)
+    if workspace is None:
+        return candidate.as_posix() if not candidate.is_absolute() else candidate.name
+    try:
+        return candidate.resolve().relative_to(workspace.resolve()).as_posix()
+    except ValueError:
+        return candidate.name
+
+
 def proposed_install_command_from_spec(
     spec: PackageInstallSpec,
     isolated_dir: str,
     *,
     python_executable: str | None = None,
+    workspace: Path | None = None,
 ) -> str:
-    python = _quote_command_part(python_executable or sys.executable)
+    python = _quote_command_part(python_executable or "python")
     env = _quote_command_part(isolated_dir)
     interpreter = _quote_command_part(isolated_dir_python(isolated_dir))
     if spec.mode == "wheel" and spec.wheel is not None:
-        find_links = _quote_command_part(str(spec.find_links))
-        artifact = _quote_command_part(str(spec.wheel))
+        find_links = _quote_command_part(
+            _path_for_command(spec.find_links, workspace) if spec.find_links else "."
+        )
+        artifact = _quote_command_part(_path_for_command(spec.wheel, workspace))
         return (
             f"{python} -m venv {env} && {interpreter} -m pip install "
             f"--isolated --no-cache-dir --no-index --find-links {find_links} {artifact}"
@@ -331,7 +344,9 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             )
             network_required = False
             install_command = proposed_install_command_from_spec(
-                spec, str(env_path.resolve()),
+                spec,
+                _path_for_command(env_path, workspace),
+                workspace=workspace,
             )
         else:
             spec = resolve_package_install_spec(
@@ -341,7 +356,9 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
             )
             network_required = True
             install_command = proposed_install_command_from_spec(
-                spec, str(env_path.resolve()),
+                spec,
+                _path_for_command(env_path, workspace),
+                workspace=workspace,
             )
     result = {
         "platform": host_platform(),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -139,24 +140,80 @@ def test_pin_mismatch_requires_install(tmp_path):
     assert discovered["found_package_version"] != "9.9.9"
 
 
+def _home_needles(home: Path) -> list[str]:
+    resolved = home.resolve()
+    needles = {
+        str(resolved),
+        resolved.as_posix(),
+        str(resolved).replace("\\", "/"),
+        json.dumps(str(resolved))[1:-1],
+        json.dumps(resolved.as_posix())[1:-1],
+    }
+    return [item for item in needles if item]
+
+
+def _leaks_home(payload: str, home: Path) -> bool:
+    return any(needle in payload for needle in _home_needles(home))
+
+
+def _string_leaves(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        leaves: list[str] = []
+        for item in value.values():
+            leaves.extend(_string_leaves(item))
+        return leaves
+    if isinstance(value, list):
+        leaves = []
+        for item in value:
+            leaves.extend(_string_leaves(item))
+        return leaves
+    return []
+
+
 def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("doctor must not spawn")
     ))
-    result = diagnose_runtime(
-        tmp_path, can_import=lambda: False,
-    )
-    assert tuple(result) == DOCTOR_RESULT_FIELDS
-    assert result["decision"] == DECISION_INSTALL_REQUIRED
-    assert result["network_required"] is True
-    assert result["local_artifact"] == "absent"
-    assert result["blocked_cause"] is None
-    assert "agent-evolution-framework==" in result["install_command"]
-    assert "--index-url" in result["install_command"]
-    assert "https://pypi.org/simple" in result["install_command"]
-    assert str(Path.home()) not in json.dumps(result)
-    assert interpreter_label().startswith(("CPython-", "PyPy-"))
-    assert "\\" not in interpreter_label() or "CPython-" in interpreter_label()
+    home = Path.home().resolve()
+    workspace = tmp_path
+    if home not in workspace.resolve().parents and workspace.resolve() != home:
+        workspace = home / ".aef-pytest-doctor-home" / "project"
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        workspace.mkdir(parents=True)
+    fake_python = home / "bin" / "secret-python"
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+    try:
+        result = diagnose_runtime(
+            workspace, can_import=lambda: False,
+        )
+        blob = json.dumps(result)
+        command = result["install_command"]
+        assert tuple(result) == DOCTOR_RESULT_FIELDS
+        assert result["decision"] == DECISION_INSTALL_REQUIRED
+        assert result["network_required"] is True
+        assert result["local_artifact"] == "absent"
+        assert result["blocked_cause"] is None
+        assert "agent-evolution-framework==" in command
+        assert "--index-url" in command
+        assert "https://pypi.org/simple" in command
+        assert command.startswith("python ") or command.startswith('"python"')
+        assert ".aef-venv" in command
+        assert str(workspace.resolve()) not in command
+        assert str(fake_python) not in command
+        assert sys.executable not in command
+        assert not _leaks_home(command, home)
+        assert not any(_leaks_home(leaf, home) for leaf in _string_leaves(result))
+        assert not _leaks_home(blob, home)
+        assert interpreter_label().startswith(("CPython-", "PyPy-"))
+        assert result["interpreter"] == interpreter_label()
+        assert "\\" not in interpreter_label() or "CPython-" in interpreter_label()
+    finally:
+        planted = home / ".aef-pytest-doctor-home"
+        if planted.exists():
+            shutil.rmtree(planted, ignore_errors=True)
 
 
 def test_local_wheel_announces_offline_install(tmp_path):

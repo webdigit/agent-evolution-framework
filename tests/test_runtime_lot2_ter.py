@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from aef import cli
-from aef.runtime_discovery import is_pep440_version_token, read_expected_package_version
+from aef.runtime_discovery import host_platform, is_pep440_version_token, read_expected_package_version
 from aef.runtime_doctor import diagnose_runtime, resolve_proposed_env_path
 from tests.test_runtime_discovery import write_venv
 
@@ -85,7 +86,7 @@ def test_two_component_wheel_visible(tmp_path):
     assert result["decision"] == "INSTALL_REQUIRED"
 
 
-def test_install_command_uses_workspace_absolute_venv(tmp_path, capsys, monkeypatch):
+def test_install_command_uses_workspace_relative_venv(tmp_path, capsys, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
     agent = workspace / ".agent"
@@ -102,10 +103,12 @@ def test_install_command_uses_workspace_absolute_venv(tmp_path, capsys, monkeypa
     proposed = envelope["result"]["install_command"]
     abs_venv = str((workspace / ".aef-venv").resolve())
     norm_proposed = proposed.replace("\\", "/")
-    norm_venv = abs_venv.replace("\\", "/")
-    assert norm_venv in norm_proposed
-    assert ".aef-venv" in norm_proposed
-    assert norm_proposed.count(".aef-venv") >= 2 or norm_venv in norm_proposed
+    assert abs_venv not in proposed
+    assert abs_venv.replace("\\", "/") not in norm_proposed
+    assert ".aef-venv" in proposed
+    assert proposed.startswith("python ") or proposed.startswith('"python"')
+    assert sys.executable not in proposed
+    assert str(Path.home()) not in proposed
 
 
 def test_symlinked_version_outside_workspace_not_read(tmp_path):
@@ -262,13 +265,13 @@ def test_install_command_targets_free_env_when_primary_occupied(tmp_path, capsys
     )
     assert code == 8
     proposed = envelope["result"]["install_command"]
-    platform_env = (workspace / f".aef-venv-{'windows' if os.name == 'nt' else 'linux'}").resolve()
-    primary_env = (workspace / ".aef-venv").resolve()
+    platform_env = f".aef-venv-{host_platform()}"
+    assert platform_env in proposed.replace("\\", "/")
+    assert str((workspace / ".aef-venv").resolve()) not in proposed
+    assert proposed.startswith("python ") or proposed.startswith('"python"')
     quoted = proposed.split("&&", 1)[0]
     target_token = quoted.replace('"', "").split()[-1]
-    target_path = Path(target_token).resolve()
-    assert target_path == platform_env
-    assert target_path != primary_env
+    assert Path(target_token).as_posix().lstrip("./") == platform_env.lstrip("./") or target_token.replace("\\", "/") == platform_env
 
 
 def test_install_command_targets_free_env_when_both_primary_names_occupied(tmp_path, capsys):
@@ -293,10 +296,12 @@ def test_install_command_targets_free_env_when_both_primary_names_occupied(tmp_p
     proposed = envelope["result"]["install_command"]
     quoted = proposed.split("&&", 1)[0]
     target_token = quoted.replace('"', "").split()[-1]
-    target_path = Path(target_token).resolve()
-    assert target_path == proposed_path.resolve()
-    assert target_path != (workspace / ".aef-venv").resolve()
-    assert target_path != platform_env.resolve()
+    relative_target = Path(target_token)
+    assert not relative_target.is_absolute()
+    assert relative_target.as_posix() == proposed_path.relative_to(workspace).as_posix()
+    assert ".aef-venv" in proposed
+    assert str((workspace / ".aef-venv").resolve()) not in proposed
+    assert str(platform_env.resolve()) not in proposed
 
 
 def test_namespace_package_declared_env_is_discovered(tmp_path):
