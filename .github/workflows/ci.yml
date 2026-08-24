@@ -51,6 +51,16 @@ jobs:
         run: check-wheel-contents dist/*.whl
       - name: Verify packaged schemas and exclusions
         run: python scripts/verify_artifacts.py dist/*.whl dist/*.tar.gz
+      - name: Run the shipped test suite from the unpacked sdist
+        shell: bash
+        run: |
+          unpack="$(mktemp -d)"
+          tar -xzf dist/*.tar.gz -C "$unpack"
+          pkg="$(find "$unpack" -mindepth 1 -maxdepth 1 -type d)"
+          test -d "$pkg"
+          test ! -e "$pkg/.git"
+          python -m pip install "$pkg[dev]"
+          (cd "$pkg" && python -m pytest -q)
       - name: Install wheel outside the checkout
         shell: bash
         run: |

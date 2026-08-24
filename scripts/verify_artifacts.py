@@ -201,6 +201,21 @@ def inspect_artifact(path: Path) -> dict[str, object]:
         }
         if examples != DOCUMENTATION_EXAMPLES:
             raise ValueError("sdist documentation example set is incomplete")
+        names = [member.as_posix() for member in normalized]
+        if not any("/scripts/" in name and name.endswith(".py") for name in names):
+            raise ValueError("sdist is missing scripts/")
+        if not any("/fixtures/" in name for name in names):
+            raise ValueError("sdist is missing fixtures/")
+    if path.suffix == ".whl":
+        names = [member.as_posix() for member in normalized]
+        if any(
+            part == "scripts" for member in normalized for part in member.parts
+        ) or any(name.startswith("scripts/") or "/scripts/" in name for name in names):
+            raise ValueError("wheel contains scripts/")
+        if any(
+            part == "fixtures" for member in normalized for part in member.parts
+        ) or any(name.startswith("fixtures/") or "/fixtures/" in name for name in names):
+            raise ValueError("wheel contains fixtures/")
     return {"artifact": path.name, "files": members, "schemas": sorted(schema_members)}
 
 

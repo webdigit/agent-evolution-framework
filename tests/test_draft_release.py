@@ -44,6 +44,20 @@ COMMIT_B = "b" * 40
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_REQUIRED_TREE_FILES = (
+    ".github/workflows/release.yml",
+    ".github/workflows/ci.yml",
+    "scripts/prepare_draft_release.py",
+    "scripts/reproducible_build.py",
+    "docs/release.md",
+    "README.md",
+)
+_missing = [rel for rel in _REQUIRED_TREE_FILES if not (ROOT / rel).is_file()]
+if _missing:
+    pytest.skip(
+        "not in this tree: " + ", ".join(_missing),
+        allow_module_level=True,
+    )
 WORKFLOW = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 CI = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 SCRIPT = (ROOT / "scripts/prepare_draft_release.py").read_text(encoding="utf-8")
