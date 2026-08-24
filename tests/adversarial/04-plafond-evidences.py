@@ -2,7 +2,6 @@ import sys as _sys, pathlib as _pl
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
 from bancenv import ROOT, AEF, PY, exiger_posix, verifier_arbre_importe, finir
 verifier_arbre_importe()
-raise SystemExit(1)
 
 
 import json, subprocess, sys, tempfile, shutil
