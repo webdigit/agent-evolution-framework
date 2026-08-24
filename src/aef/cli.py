@@ -843,8 +843,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     commands = parser.add_subparsers(dest="command", required=True)
     init_parser = commands.add_parser(
-        "init", help="initialize an AEF V1 workspace",
-        description="Initialize the official AEF V1 profile in one project.",
+        "init", help="initialize a workspace under the V1 contract",
+        description="Initialize the official V1 workspace-contract profile in one project.",
     )
     init_parser.add_argument("--instance-id", metavar="ID", help="explicit stable workspace identity")
     init_parser.add_argument("--role", metavar="ROLE", help="required primary agent role")
@@ -903,7 +903,7 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         parser.add_argument(
             "--scope", default="project", metavar="project",
-            help="integration scope (V1 supports project only; default: project)",
+            help="integration scope (V1 workspace contract: project only; default: project)",
         )
         action = parser.add_mutually_exclusive_group()
         action.add_argument(

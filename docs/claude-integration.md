@@ -16,8 +16,8 @@ aef integrate all
 root `CLAUDE.md` doorbell and co-installs `AGENTS.md` when needed. It does
 **not** create a new fat bridge under `.claude/`.
 
-The only V1 scope is `project`, which is also the default. User and hybrid
-scopes are not supported.
+The V1 workspace contract supports only the `project` scope, which is also
+the default. User and hybrid scopes are not supported.
 
 ## What is loaded
 
@@ -73,7 +73,7 @@ health. Malformed unmanaged Claude settings are warnings and are never
 repaired. Health of guidance doors is reported here, not by `aef audit`
 (which stays centered on `.agent/`). A hand-edited managed block is `BLOCKED`
 on `--status`; `aef audit` still returns `PASS` with no findings for that
-drift — that is the V1 contract (A5), not a detection gap. An incomplete
+drift — that is the V1 workspace contract (A5), not a detection gap. An incomplete
 EVALUATE transaction blocks installation and removal, but does not block
 status.
 

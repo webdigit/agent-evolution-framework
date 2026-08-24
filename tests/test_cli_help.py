@@ -21,13 +21,13 @@ def test_top_level_help_explains_project_scope_and_machine_output(capsys):
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        (["init", "--help"], "official AEF V1 profile"),
+        (["init", "--help"], "official V1 workspace-contract profile"),
         (["audit", "--help"], "without modifying it"),
         (["discover", "--help"], "without granting authority"),
         (["consolidate", "--help"], "knowledge-rule lifecycles"),
         (["evaluate", "--help"], "explicit human decisions"),
         (["integrate", "--help"], "guidance doors"),
-        (["integrate", "claude", "--help"], "V1 supports project only"),
+        (["integrate", "claude", "--help"], "V1 workspace contract: project only"),
         (["integrate", "agents", "--help"], "AGENTS.md"),
         (["integrate", "gemini", "--help"], "GEMINI.md"),
         (["integrate", "all", "--help"], "doorbells together"),

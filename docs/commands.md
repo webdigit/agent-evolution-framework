@@ -16,7 +16,8 @@ rendering or one `aef.cli/v1` JSON document.
 aef init --role ROLE [--instance-id ID] [--created-at RFC3339] [--dry-run]
 ```
 
-Creates the official AEF V1 project state. A new-workspace dry-run requires an
+Creates the official project state under the V1 workspace contract
+(`schema_version` `1.0.0`). A new-workspace dry-run requires an
 explicit `--instance-id` and `--created-at`. Reuse the same values when running
 the real initialization so it applies the plan that was reviewed. AEF does not
 generate temporary dry-run values. Replaying identical input returns
@@ -160,7 +161,8 @@ aef consolidate --reviews reviews.json [--dry-run]
 
 Reviews existing rule lifecycles with `keep`, `specialize`, `supersede`, or
 `retire`. Modifying actions require explicit human approval and resolvable
-evidence. V1 does not create principles or autonomous knowledge.
+evidence. The V1 workspace contract does not create principles or autonomous
+knowledge.
 
 ## EVALUATE
 
@@ -197,7 +199,7 @@ the **already installed** package. It is not a software update. There is no
 result without creating a file or directory. `upgrade` applies the plan.
 `--recover` handles only an unfinished UPGRADE transaction.
 
-On a valid V1 workspace already at `schema_version` `1.0.0`, `--check`,
+On a valid V1 workspace contract already at `schema_version` `1.0.0`, `--check`,
 `--dry-run`, `upgrade`, and replay return `NO_CHANGE`.
 
 The envelope stays `aef.cli/v1` with `command=UPGRADE`. Human and JSON output
@@ -217,8 +219,9 @@ environments. It never executes third-party binaries from `PATH`. Use `--json`
 before the command.
 
 A compatible runtime returns `PASS` (exit 0). A missing or incompatible runtime
-returns `INSTALL_REQUIRED` (exit 8) with a pinned, workspace-absolute Python
-install proposal in `install_command`. The operator runs that command manually
+returns `INSTALL_REQUIRED` (exit 8) with a pinned, workspace-relative Python
+install proposal in `install_command`. The host interpreter is named by label
+(`CPython-3.13`), not by filesystem path. The operator runs that command manually
 after review. Automated installation from `doctor` is deferred to a later
 release. See [Runtime bootstrap](runtime.md).
 

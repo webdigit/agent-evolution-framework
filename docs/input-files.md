@@ -13,8 +13,8 @@ aef discover --snapshot docs/examples/connectors.json --dry-run
 aef discover --snapshot docs/examples/connectors.json
 ```
 
-The root contains only the required `connectors` array; DISCOVER V1 has no
-protocol field. Every connector requires a unique non-empty `id`, one of the
+The root contains only the required `connectors` array; DISCOVER under the
+V1 workspace contract has no protocol field. Every connector requires a unique non-empty `id`, one of the
 statuses `available`, `unavailable`, `deprecated`, `unknown`, or `restricted`,
 and a `capabilities` array.
 
