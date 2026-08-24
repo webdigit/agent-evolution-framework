@@ -11,7 +11,7 @@ persists. Failure: CHANGE while a concurrent write is overwritten, or an
 active writer never surfaces workspace_contention (the apply-time guard is
 dead).
 """
-import json, subprocess, sys, tempfile, shutil, threading, time, uuid
+import json, subprocess, sys, tempfile, shutil, threading, uuid
 from pathlib import Path
 sys.path.insert(0, str(ROOT / "src"))
 from aef.record_document import build_persisted_record
@@ -84,7 +84,6 @@ def sneak_loop(path, payload, stop, writes):
             writes.append(1)
         except OSError:
             pass
-        time.sleep(0.001)
 
 
 def with_writer(ws, argv):
