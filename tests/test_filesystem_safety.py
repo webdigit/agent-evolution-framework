@@ -12,6 +12,7 @@ import aef.filesystem as filesystem
 from aef.filesystem import (
     EVALUATION_TRANSACTION_PATH,
     EvaluationRecoveryRequiredError,
+    WorkspaceContentionError,
     WorkspacePathError,
     apply_workspace,
     load_workspace,
@@ -614,3 +615,47 @@ def test_fail_closed_transaction_entry_has_stable_cli_output(
         assert envelope["meta"]["reason"] == "evaluation_recovery_required"
         if mode == "compact":
             assert completed.stdout.count("\n") == 1
+
+
+def test_stale_snapshot_between_load_and_apply_raises_contention(tmp_path: Path):
+    apply_workspace(
+        tmp_path,
+        load_workspace(tmp_path),
+        _desired(".agent/state/note.txt", "original"),
+    )
+    current = load_workspace(tmp_path)
+    (tmp_path / ".agent/state/note.txt").write_text("sneak", encoding="utf-8")
+    desired = {
+        "files": {
+            **current["files"],
+            ".agent/state/other.txt": "added",
+        }
+    }
+
+    with pytest.raises(WorkspaceContentionError, match="changed since it was loaded"):
+        apply_workspace(tmp_path, current, desired)
+
+    assert (tmp_path / ".agent/state/note.txt").read_text(encoding="utf-8") == "sneak"
+    assert not (tmp_path / ".agent/state/other.txt").exists()
+
+
+def test_apply_succeeds_when_snapshot_matches_disk(tmp_path: Path):
+    apply_workspace(
+        tmp_path,
+        load_workspace(tmp_path),
+        _desired(".agent/state/note.txt", "original"),
+    )
+    current = load_workspace(tmp_path)
+    desired = {
+        "files": {
+            **current["files"],
+            ".agent/state/other.txt": "added",
+        }
+    }
+
+    diff = apply_workspace(tmp_path, current, desired)
+
+    assert ".agent/state/other.txt" in diff["created"]
+    assert (tmp_path / ".agent/state/other.txt").read_text(encoding="utf-8") == "added"
+    assert (tmp_path / ".agent/state/note.txt").read_text(encoding="utf-8") == "original"
+
