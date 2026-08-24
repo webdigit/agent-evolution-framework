@@ -256,3 +256,22 @@ def test_release_artifact_inspector_rejects_wheel_containing_fixtures(tmp_path):
     _wheel(wheel, extra=["fixtures/minimal/manifest.json"])
     with pytest.raises(ValueError, match="wheel contains fixtures"):
         inspect_artifact(wheel)
+
+
+@pytest.mark.parametrize(
+    "member, fragment",
+    [
+        ("tests/test_x.py", "tests"),
+        ("tests/adversarial/14-ecrivain-externe.py", "tests"),
+        ("docs/x.md", "docs"),
+        (".github/workflows/ci.yml", ".github"),
+        ("src/aef/__init__.py", "src"),
+    ],
+)
+def test_release_artifact_inspector_rejects_wheel_containing_non_runtime_tree(
+    tmp_path, member, fragment
+):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=[member])
+    with pytest.raises(ValueError, match=f"wheel contains {fragment}"):
+        inspect_artifact(wheel)

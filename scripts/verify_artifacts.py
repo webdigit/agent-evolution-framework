@@ -67,6 +67,8 @@ PRIVATE_PREFIXES_FOLD = tuple(
     tuple(part.casefold() for part in prefix) for prefix in PRIVATE_PREFIXES
 )
 ALLOWED_TAR_TYPES = {tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE}
+# First-level trees that belong in the sdist (or nowhere), never in the wheel.
+WHEEL_FORBIDDEN_TREES = ("tests", "scripts", "fixtures", "docs", ".github", "src")
 
 
 def _zip_raw_names(path: Path) -> list[str]:
@@ -155,6 +157,13 @@ def _is_secret_or_local_name(name: str) -> bool:
     return folded in PRIVATE_KEY_NAMES
 
 
+def _wheel_contains_tree(normalized: list[PurePosixPath], names: list[str], tree: str) -> bool:
+    prefix = f"{tree}/"
+    return any(tree in member.parts for member in normalized) or any(
+        name.startswith(prefix) or f"/{prefix}" in f"/{name}" for name in names
+    )
+
+
 def _is_private_folded(folded: tuple[str, ...]) -> bool:
     if PRIVATE_PARTS_FOLD.intersection(folded):
         return True
@@ -208,14 +217,9 @@ def inspect_artifact(path: Path) -> dict[str, object]:
             raise ValueError("sdist is missing fixtures/")
     if path.suffix == ".whl":
         names = [member.as_posix() for member in normalized]
-        if any(
-            part == "scripts" for member in normalized for part in member.parts
-        ) or any(name.startswith("scripts/") or "/scripts/" in name for name in names):
-            raise ValueError("wheel contains scripts/")
-        if any(
-            part == "fixtures" for member in normalized for part in member.parts
-        ) or any(name.startswith("fixtures/") or "/fixtures/" in name for name in names):
-            raise ValueError("wheel contains fixtures/")
+        for tree in WHEEL_FORBIDDEN_TREES:
+            if _wheel_contains_tree(normalized, names, tree):
+                raise ValueError(f"wheel contains {tree}/")
     return {"artifact": path.name, "files": members, "schemas": sorted(schema_members)}
 
 
