@@ -34,7 +34,7 @@ jobs:
           fi
           echo "name=$RAW_TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ steps.tag.outputs.name }}
           fetch-depth: 0
@@ -42,7 +42,7 @@ jobs:
       - name: Fetch main
         run: git fetch --no-tags origin main:refs/remotes/origin/main
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip

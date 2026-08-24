@@ -1,0 +1,305 @@
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from aef.runtime_discovery import (
+    DECISION_BLOCKED,
+    DECISION_INSTALL_REQUIRED,
+    DECISION_OK,
+    INSTALL_REQUIRED_EXIT,
+    discover_runtime,
+    inspect_venv_tree,
+    interpreter_label,
+    read_expected_package_version,
+)
+from aef.runtime_doctor import (
+    DOCTOR_RESULT_FIELDS,
+    PackageInstallSpec,
+    diagnose_runtime,
+    proposed_install_command_from_spec,
+    resolve_package_install_spec,
+)
+
+
+def write_venv(root: Path, *, kind: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    if kind == "windows":
+        (root / "pyvenv.cfg").write_text("home = C:\\Python311\n", encoding="utf-8")
+        scripts = root / "Scripts"
+        scripts.mkdir()
+        (scripts / "python.exe").write_bytes(b"")
+    elif kind == "posix":
+        (root / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        binary = root / "bin"
+        binary.mkdir()
+        (binary / "python").write_bytes(b"")
+    elif kind == "empty":
+        (root / "pyvenv.cfg").write_text("home = unknown\n", encoding="utf-8")
+    return root
+
+
+def no_path(_name: str) -> None:
+    return None
+
+
+def test_install_required_is_distinct_from_blocked_and_error():
+    assert DECISION_INSTALL_REQUIRED == "INSTALL_REQUIRED"
+    assert DECISION_INSTALL_REQUIRED not in {DECISION_BLOCKED, "FAIL", "ERROR", "FAILED"}
+    assert INSTALL_REQUIRED_EXIT == 8
+    assert INSTALL_REQUIRED_EXIT not in {0, 1, 3, 4, 5, 6, 70}
+
+
+def test_expected_package_version_is_not_framework_or_schema(tmp_path):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "1.2.0", "framework_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    (agent / "manifest.json").write_text(
+        json.dumps({"framework_version": "1.0.0", "schema_version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    expected = read_expected_package_version(tmp_path)
+    assert expected["status"] == "valid"
+    assert expected["value"] == "1.2.0"
+    discovered = discover_runtime(
+        tmp_path, can_import=lambda: False,
+    )
+    assert discovered["expected_package_version"] == "1.2.0"
+    assert "framework_version" not in discovered
+    assert "schema_version" not in discovered
+
+
+@pytest.mark.parametrize(
+    ("host", "kind", "expected"),
+    [
+        ("windows", "windows", "compatible"),
+        ("windows", "posix", "incompatible"),
+        ("linux", "posix", "compatible"),
+        ("linux", "windows", "incompatible"),
+        ("macos", "posix", "compatible"),
+        ("macos", "windows", "incompatible"),
+        ("linux", "empty", "unknown"),
+    ],
+)
+def test_inspect_venv_tree_never_spawns(monkeypatch, tmp_path, host, kind, expected):
+    monkeypatch.setattr("aef.runtime_discovery.host_platform", lambda: host)
+    root = write_venv(tmp_path / ".venv", kind=kind)
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("fixture venv binary must not be spawned")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+    monkeypatch.setattr(subprocess, "Popen", fail_run)
+    assert inspect_venv_tree(root, tmp_path) == expected
+    assert inspect_venv_tree(tmp_path / "missing", tmp_path) == "absent"
+
+
+def test_empty_venv_is_not_a_declared_runtime(tmp_path, monkeypatch):
+    write_venv(tmp_path / ".aef-venv", kind="windows" if __import__("os").name == "nt" else "posix")
+    discovered = discover_runtime(
+        tmp_path, can_import=lambda: False,
+    )
+    assert discovered["discovery_method"] == "none"
+    assert discovered["decision"] == DECISION_INSTALL_REQUIRED
+    assert discovered["venv_status"] == "compatible"
+
+
+def test_discovery_order_declared_env_wins_over_imported(tmp_path):
+    write_venv(tmp_path / ".aef-venv", kind="windows" if __import__("os").name == "nt" else "posix")
+    pkg = tmp_path / ".aef-venv" / ("Lib" if __import__("os").name == "nt" else "lib/python3.11")
+    pkg = pkg / "site-packages" / "aef"
+    pkg.mkdir(parents=True)
+    (pkg / "_version.py").write_text('__version__ = "1.2.0"\n', encoding="utf-8")
+    (tmp_path / "aef").write_bytes(b"")
+    (tmp_path / "aef.exe").write_bytes(b"")
+
+    declared = discover_runtime(tmp_path, can_import=lambda: False)
+    assert declared["discovery_method"] == "declared_env"
+    assert declared["found_package_version"] == "1.2.0"
+    assert declared["decision"] == DECISION_OK
+
+    with_import = discover_runtime(tmp_path, can_import=lambda: True)
+    assert with_import["discovery_method"] == "declared_env"
+    assert with_import["found_package_version"] == "1.2.0"
+
+
+def test_pin_mismatch_requires_install(tmp_path):
+    agent = tmp_path / ".agent"
+    agent.mkdir()
+    (agent / "runtime-requirements.json").write_text(
+        json.dumps({"expected_package_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    discovered = discover_runtime(
+        tmp_path, can_import=lambda: True,
+    )
+    assert discovered["decision"] == DECISION_INSTALL_REQUIRED
+    assert discovered["found_package_version"] != "9.9.9"
+
+
+def _home_needles(home: Path) -> list[str]:
+    resolved = home.resolve()
+    needles = {
+        str(resolved),
+        resolved.as_posix(),
+        str(resolved).replace("\\", "/"),
+        json.dumps(str(resolved))[1:-1],
+        json.dumps(resolved.as_posix())[1:-1],
+    }
+    return [item for item in needles if item]
+
+
+def _leaks_home(payload: str, home: Path) -> bool:
+    return any(needle in payload for needle in _home_needles(home))
+
+
+def _string_leaves(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        leaves: list[str] = []
+        for item in value.values():
+            leaves.extend(_string_leaves(item))
+        return leaves
+    if isinstance(value, list):
+        leaves = []
+        for item in value:
+            leaves.extend(_string_leaves(item))
+        return leaves
+    return []
+
+
+def test_diagnose_fields_and_no_home_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("doctor must not spawn")
+    ))
+    home = Path.home().resolve()
+    workspace = tmp_path
+    if home not in workspace.resolve().parents and workspace.resolve() != home:
+        workspace = home / ".aef-pytest-doctor-home" / "project"
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        workspace.mkdir(parents=True)
+    fake_python = home / "bin" / "secret-python"
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+    try:
+        result = diagnose_runtime(
+            workspace, can_import=lambda: False,
+        )
+        blob = json.dumps(result)
+        command = result["install_command"]
+        assert tuple(result) == DOCTOR_RESULT_FIELDS
+        assert result["decision"] == DECISION_INSTALL_REQUIRED
+        assert result["network_required"] is True
+        assert result["local_artifact"] == "absent"
+        assert result["blocked_cause"] is None
+        assert "agent-evolution-framework==" in command
+        assert "--index-url" in command
+        assert "https://pypi.org/simple" in command
+        assert command.startswith("python ") or command.startswith('"python"')
+        assert ".aef-venv" in command
+        assert str(workspace.resolve()) not in command
+        assert str(fake_python) not in command
+        assert sys.executable not in command
+        assert not _leaks_home(command, home)
+        assert not any(_leaks_home(leaf, home) for leaf in _string_leaves(result))
+        assert not _leaks_home(blob, home)
+        assert interpreter_label().startswith(("CPython-", "PyPy-"))
+        assert result["interpreter"] == interpreter_label()
+        assert "\\" not in interpreter_label() or "CPython-" in interpreter_label()
+    finally:
+        planted = home / ".aef-pytest-doctor-home"
+        if planted.exists():
+            shutil.rmtree(planted, ignore_errors=True)
+
+
+def test_local_wheel_announces_offline_install(tmp_path):
+    wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    payload = b"wheel"
+    wheel.write_bytes(payload)
+    import hashlib
+    digest = hashlib.sha256(payload).hexdigest()
+    (tmp_path / f"{wheel.name}.sha256").write_text(f"{digest}  {wheel.name}\n", encoding="utf-8")
+    dep = tmp_path / "jsonschema-4.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(dep, "w") as archive:
+        archive.writestr("jsonschema-4.0.0.dist-info/METADATA", "Name: jsonschema\n")
+        archive.writestr("jsonschema-4.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+    result = diagnose_runtime(
+        tmp_path, can_import=lambda: False,
+    )
+    assert result["local_artifact"] == "checksum_matched"
+    assert result["network_required"] is False
+    assert result["offline_basis"] == "self_attested_checksum"
+    assert "--no-index" in result["install_command"]
+
+
+def test_unverified_wheel_is_not_presented_as_available(tmp_path):
+    wheel = tmp_path / "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    wheel.write_bytes(b"wheel")
+    result = diagnose_runtime(
+        tmp_path, can_import=lambda: False,
+    )
+    assert result["local_artifact"] == "available_unverified"
+    assert result["network_required"] is True
+    assert result["local_artifact"] != "available"
+    assert "--index-url" in result["install_command"]
+    assert "--no-index" not in result["install_command"]
+
+
+def test_proposed_command_quotes_spaces():
+    spec = resolve_package_install_spec(
+        expected_package_version="1.2.0",
+        artifact="checksum_matched",
+        wheel=Path("agent_evolution_framework-1.2.0 my wheel.whl"),
+    )
+    command = proposed_install_command_from_spec(spec, ".aef-venv")
+    assert "python" in command.lower() or "py -3.11" in command
+    assert "venv" in command
+    assert "agent_evolution_framework-1.2.0 my wheel.whl" in command or "my" in command
+
+
+def test_install_command_raises_when_wheel_is_outside_workspace(tmp_path):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    wheel = outside / "pkg-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"w")
+    spec = PackageInstallSpec(
+        mode="wheel",
+        pin_version="1.0.0",
+        wheel=wheel,
+        find_links=outside,
+        pip_args=(),
+    )
+    with pytest.raises(ValueError, match="outside the workspace"):
+        proposed_install_command_from_spec(spec, ".aef-venv", workspace=workspace)
+
+
+def test_external_env_is_blocked(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    link = workspace / ".venv"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not available")
+    discovered = discover_runtime(
+        workspace, can_import=lambda: False,
+    )
+    assert discovered["decision"] == DECISION_BLOCKED
+    assert discovered["external_env"] is True
+    assert discovered["venv_status"] == "blocked"
+    assert discovered["blocked_cause"] == "external_env"
+    assert discovered["blocked_path"].startswith(".venv ->")

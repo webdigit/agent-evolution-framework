@@ -9,6 +9,8 @@ from .claude_integration import CLAUDE_BRIDGE_PATH, CORE_DOCTRINE_PATHS
 from .filesystem import (
     EvaluationRecoveryRequiredError,
     _evaluation_transaction_entry_present,
+    copy_file_mode,
+    file_is_readonly,
 )
 
 
@@ -195,6 +197,12 @@ def apply_claude_bridge(root: str | Path, existing: bytes | None, desired: bytes
             raise ClaudeIntegrationFilesystemError(
                 "Claude instruction file changed before replace"
             )
+        if target.exists() and file_is_readonly(target):
+            raise ClaudeIntegrationFilesystemError(
+                "Claude instruction file is not replaceable"
+            )
+        if target.exists():
+            copy_file_mode(target, temporary)
         os.replace(temporary, target)
         temporary = None
         published = True

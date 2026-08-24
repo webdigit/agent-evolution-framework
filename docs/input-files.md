@@ -129,6 +129,64 @@ the same valid document against a valid matching file returns `NO_CHANGE`
 without rewriting. Reusing `record_id` with different content is a conflict
 and does not rewrite the existing file.
 
+Do not add learning `kind` fields to a RECORD document. RECORD does not ingest.
+
+## INGEST declared-event intake
+
+Use [ingest.json](examples/ingest.json) after the cited record is persisted
+(for the bundled example, apply [recording.json](examples/recording.json)
+first):
+
+```console
+aef record --recording docs/examples/recording.json
+aef ingest --intake docs/examples/ingest.json --dry-run
+aef ingest --intake docs/examples/ingest.json
+```
+
+The closed root uses protocol `aef.ingest.submit/v1`. Each citation requires a
+filesystem-safe `record_id`, the persisted `digest` (`sha256:` plus 64 hex
+characters), and one or more already-normalized `events`. AEF does not infer
+a `kind` from `payload.incidents`.
+
+Each event requires an `id` and either `novel` set to `true` or a `kind` of
+`help_request`, `human_correction`, `rule_mismatch`, or `success`.
+`rule_mismatch` requires `rule_id`. `success` requires `explained`.
+`pattern_key` and `competency` are optional. Unknown fields are rejected.
+Duplicate keys are rejected at every object depth.
+
+INGEST derives learning signals, observations, and candidate hypotheses only.
+It does not create XP, rules, or competencies, and it is not a runtime `doctor`
+install.
+
+## COMPETENCY declaration
+
+Use [competency-declaration.json](examples/competency-declaration.json) after
+the cited record is persisted (for the bundled example, apply
+[recording.json](examples/recording.json) first):
+
+```console
+aef record --recording docs/examples/recording.json
+aef competency declare --declaration docs/examples/competency-declaration.json --dry-run
+aef competency declare --declaration docs/examples/competency-declaration.json
+```
+
+The closed root uses protocol `aef.competency.declare.submit/v1`. It requires a
+`competency_id`, `title`, `scope`, `limits`, `rationale`, at least one record
+citation (`record_id` + persisted `digest`), and a human `decision` with
+`source: "human"`, non-empty `actor`, RFC 3339 `decided_at`, and
+`approved: true`. Unknown fields are rejected. Level, XP, Trust, and permission
+fields are forbidden.
+
+The command creates **L1 only**. It is not EVALUATE promotion and not INGEST
+knowledge derivation. Do not edit `.agent/state/competencies.json` by hand.
+
+Interrupted declarations leave a distinct recovery journal. Start recovery with:
+
+```console
+aef competency declare --recover --dry-run
+aef competency declare --recover
+```
+
 ## Refresh and recovery
 
 `aef evaluate --list` is strictly read-only. Refresh may change recommendation
@@ -147,5 +205,6 @@ aef evaluate --recover --dry-run
 aef evaluate --recover
 ```
 
-When recovery is required, all other modifying operations are blocked. Never
-edit or delete the transaction journal manually.
+When recovery is required (EVALUATE, UPGRADE, or competency declaration), all
+other modifying operations are blocked. Never edit or delete a transaction
+journal manually.

@@ -15,6 +15,8 @@ from aef.filesystem import apply_workspace, load_workspace
 from aef.knowledge_state import validate_knowledge_state
 from aef.operations import validate_discovery_snapshot
 from aef.promotion_recommendations import validate_evaluation_state
+from aef.ingest_intake import validate_ingest_submission
+from aef.competency_declaration import validate_competency_declaration
 from aef.record_document import build_persisted_record, validate_record_submission
 from aef.schema_validation import draft202012_validator, load_packaged_schema
 from aef.strict_json import validate_strict_json
@@ -200,6 +202,8 @@ def test_documentation_links_and_command_claims_are_current():
         "evaluate --refresh --dry-run",
         "evaluate --recover --dry-run",
         "record --recording FILE [--dry-run]",
+        "ingest --intake FILE [--dry-run]",
+        "competency declare --declaration FILE [--dry-run]",
     ):
         assert fragment in commands or fragment in guide
     assert "Canonical input files" in readme
@@ -208,12 +212,18 @@ def test_documentation_links_and_command_claims_are_current():
     assert "--refresh` can modify" in commands
     assert "Personal User Name" not in guide
 
-    wheel_url = (
+    legacy_wheel_url = (
         "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/"
         "agent_evolution_framework-1.1.0-py3-none-any.whl"
     )
+    current_wheel_url = (
+        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.2.0/"
+        "agent_evolution_framework-1.2.0-py3-none-any.whl"
+    )
+    assert current_wheel_url in installation
+    for document in (readme, getting_started):
+        assert legacy_wheel_url in document
     for document in (readme, installation, getting_started):
-        assert wheel_url in document
         assert "does not require Git" in document
         assert "air-gap" in document
         assert "SHA256SUMS.txt" in document
@@ -374,3 +384,13 @@ def test_auto_memory_pronoun_without_antecedent_is_rejected():
 
     with pytest.raises(AssertionError):
         _assert_auto_memory_location_is_qualified(audit_reproduction)
+
+def test_ingest_example_document_validates_against_intake_contract():
+    intake = validate_ingest_submission(_document("ingest.json"))
+    assert intake["protocol"] == "aef.ingest.submit/v1"
+    assert intake["records"]
+
+def test_competency_declaration_example_validates_against_declare_contract():
+    declaration = validate_competency_declaration(_document("competency-declaration.json"))
+    assert declaration["protocol"] == "aef.competency.declare.submit/v1"
+    assert declaration["competency_id"]

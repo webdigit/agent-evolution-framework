@@ -35,7 +35,16 @@ def test_complete_release_tree_is_clean(tmp_path):
 
 
 def test_actual_release_candidate_tree_is_clean():
-    result = check_release_tree(Path(__file__).resolve().parents[1])
+    root = Path(__file__).resolve().parents[1]
+    probe = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        pytest.skip("this tree is not a git work tree")
+    result = check_release_tree(root)
 
     assert result.returncode == 0
     assert result.stdout == ""
@@ -56,7 +65,10 @@ def test_complete_release_tree_detects_whitespace_errors(tmp_path, content):
 
 
 def test_repository_workflow_uses_complete_tree_checker():
-    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    if not workflow.is_file():
+        pytest.skip("ci workflow is not in this tree")
+    text = workflow.read_text(encoding="utf-8")
 
-    assert "python scripts/check_release_whitespace.py" in workflow
-    assert "git show --check HEAD" not in workflow
+    assert "python scripts/check_release_whitespace.py" in text
+    assert "git show --check HEAD" not in text

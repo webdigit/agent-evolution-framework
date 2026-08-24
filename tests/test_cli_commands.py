@@ -250,6 +250,8 @@ def test_explicit_dry_run_plan_matches_equivalent_real_write_bytes(tmp_path, cap
         for path in (tmp_path / ".agent").rglob("*")
         if path.is_file()
     }
+    from aef.filesystem import WORKSPACE_INTERNAL_PATHS
+    written_paths -= WORKSPACE_INTERNAL_PATHS
     assert written_paths == planned_paths
     for relative_path, content in rendered.items():
         assert (tmp_path / relative_path).read_bytes() == content.encode("utf-8")
@@ -281,11 +283,12 @@ def test_explicit_dry_run_plan_matches_equivalent_real_write_bytes(tmp_path, cap
     assert (tmp_path / ".agent/core/constitution.md").read_bytes() == expected_constitution
     assert outside.read_bytes() == b"project-owned\n"
     assert not any(path.name.endswith(".tmp") for path in tmp_path.rglob("*"))
-    assert {
+    non_agent_files = {
         path.relative_to(tmp_path).as_posix()
         for path in tmp_path.rglob("*")
         if path.is_file() and ".agent" not in path.relative_to(tmp_path).parts
-    } == {"project-owned.txt"}
+    }
+    assert non_agent_files == {"project-owned.txt", ".gitignore"}
 
     replay_code, replay, _ = invoke(capsys, *init_args(tmp_path, "--dry-run"))
     assert replay_code == 0

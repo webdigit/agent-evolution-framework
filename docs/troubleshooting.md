@@ -5,6 +5,34 @@
 Try `python -m aef --version`. On Windows, also try `py -3.11 -m aef`. Ensure
 the Python Scripts directory for the installation is on `PATH`.
 
+If neither entry point runs, treat the situation as `INSTALL_REQUIRED`. Do not
+edit `.agent/state/`. Run `aef doctor` or `aef --json doctor` when a compatible
+interpreter can import the package, review the pinned proposal in
+`install_command`, and run it manually. See [Runtime bootstrap](runtime.md).
+
+## `INSTALL_REQUIRED`
+
+`aef doctor` reports this status when no compatible AEF runtime is available.
+It is not an audit failure and not a blocked workspace mutation. An existing
+`.venv` from another platform is left untouched. A local wheel is used only
+when its hash matches.
+
+## `doctor` returns `BLOCKED`
+
+`aef doctor` reports `BLOCKED` (exit 4) when diagnosis cannot proceed safely.
+Read `blocked_cause` and `blocked_path` in the JSON envelope, or the `Cause` /
+`Path` lines in human output. Common causes:
+
+- `invalid_expected_package_version` — `.agent/runtime-requirements.json` is
+  missing, malformed, or carries a non-PEP-440 version.
+- `external_env` — a declared virtual environment symlink escapes the
+  workspace (`blocked_path` names the declared env entry).
+- `ambiguous_local_wheels` — multiple local wheels match and none can be chosen
+  while installation is still required.
+
+Fix the reported path or requirement, then rerun `aef doctor`. `BLOCKED` is not
+`INSTALL_REQUIRED` and proposes no install command.
+
 ## INIT is blocked
 
 Pass an explicit role:
@@ -59,8 +87,14 @@ aef integrate claude --status
 ```
 
 Do not hand-edit the managed markers. A modified, duplicate, incomplete, or
-unknown-version segment is preserved and blocks writes. Unmanaged Claude
-settings warnings do not get repaired by AEF.
+unknown-version segment is preserved and blocks writes. Detect that drift with
+`aef integrate <door> --status` (status `BLOCKED`). `aef audit` does not
+inspect those segments and will stay `PASS`. Unmanaged Claude settings
+warnings do not get repaired by AEF.
+
+A marker quoted inside a markdown fence (`` ``` `` or `~~~`) or a four-space
+indented code block is documentation, not an installation. `--remove` must not
+strip those quoted bytes.
 
 ## Remove Claude guidance
 
@@ -71,6 +105,14 @@ aef integrate claude --remove
 
 The file is retained, even when empty. User content outside the segment remains
 unchanged.
+
+## INGEST is blocked
+
+`aef ingest` is blocked when a cited `record_id` is missing, unreadable, or
+the intake `digest` does not match the persisted record. Nothing is written
+under `.agent/knowledge/`. This is not `INSTALL_REQUIRED` and not an upgrade
+recovery. Persist the record first, copy its digest into the intake, then
+retry. An invalid intake document is exit 3, not a blocked citation.
 
 ## A draft Release job failed
 

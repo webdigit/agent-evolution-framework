@@ -62,3 +62,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "aef.schemas" = ["*.json"]
+
+[tool.pytest.ini_options]
+norecursedirs = [".*", "build", "dist", "CVS", "_darcs", "{arch}", "*.egg", "*.egg-info", "adversarial"]
+pythonpath = ["."]

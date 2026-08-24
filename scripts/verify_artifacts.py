@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tarfile
 from pathlib import Path, PurePosixPath
 
@@ -12,12 +13,14 @@ SCHEMAS = {
     "capability.schema.json",
     "career.schema.json",
     "competencies.schema.json",
+    "competency-declaration-submission.schema.json",
     "evaluation.schema.json",
     "exploration.schema.json",
     "knowledge.schema.json",
     "manifest.schema.json",
     "migrations.schema.json",
     "policies.schema.json",
+    "ingest-submission.schema.json",
     "record-submission.schema.json",
     "record.schema.json",
     "supervision.schema.json",
@@ -26,6 +29,8 @@ SCHEMAS = {
 DOCUMENTATION_EXAMPLES = {
     "connectors.json", "reviews.json", "evaluation-decisions.json",
     "recording.json",
+    "ingest.json",
+    "competency-declaration.json",
 }
 FORBIDDEN_PARTS = {
     ".agent", ".venv", "__pycache__", ".pytest_cache", "build", "dist",
@@ -63,6 +68,8 @@ PRIVATE_PREFIXES_FOLD = tuple(
     tuple(part.casefold() for part in prefix) for prefix in PRIVATE_PREFIXES
 )
 ALLOWED_TAR_TYPES = {tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE}
+# First-level trees that belong in the sdist (or nowhere), never in the wheel.
+WHEEL_FORBIDDEN_TREES = ("tests", "scripts", "fixtures", "docs", ".github", "src")
 
 
 def _zip_raw_names(path: Path) -> list[str]:
@@ -151,6 +158,13 @@ def _is_secret_or_local_name(name: str) -> bool:
     return folded in PRIVATE_KEY_NAMES
 
 
+def _wheel_contains_tree(normalized: list[PurePosixPath], names: list[str], tree: str) -> bool:
+    prefix = f"{tree}/"
+    return any(tree in member.parts for member in normalized) or any(
+        name.startswith(prefix) or f"/{prefix}" in f"/{name}" for name in names
+    )
+
+
 def _is_private_folded(folded: tuple[str, ...]) -> bool:
     if PRIVATE_PARTS_FOLD.intersection(folded):
         return True
@@ -197,6 +211,18 @@ def inspect_artifact(path: Path) -> dict[str, object]:
         }
         if examples != DOCUMENTATION_EXAMPLES:
             raise ValueError("sdist documentation example set is incomplete")
+        names = [member.as_posix() for member in normalized]
+        if not any("/scripts/" in name and name.endswith(".py") for name in names):
+            raise ValueError("sdist is missing scripts/")
+        if not any("/fixtures/" in name for name in names):
+            raise ValueError("sdist is missing fixtures/")
+        if not any("/.github/" in name and name.endswith(".yml") for name in names):
+            raise ValueError("sdist is missing .github/")
+    if path.suffix == ".whl":
+        names = [member.as_posix() for member in normalized]
+        for tree in WHEEL_FORBIDDEN_TREES:
+            if _wheel_contains_tree(normalized, names, tree):
+                raise ValueError(f"wheel contains {tree}/")
     return {"artifact": path.name, "files": members, "schemas": sorted(schema_members)}
 
 
@@ -204,7 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args(argv)
-    report = [inspect_artifact(path) for path in args.artifacts]
+    try:
+        report = [inspect_artifact(path) for path in args.artifacts]
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True))
     return 0
 

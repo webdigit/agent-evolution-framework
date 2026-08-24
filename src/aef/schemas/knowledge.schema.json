@@ -48,7 +48,8 @@
         "evidence_ids": {
           "type": "array",
           "items": {"type": "string"},
-          "uniqueItems": true
+          "uniqueItems": true,
+          "maxItems": 128
         },
         "supersedes": {"type": ["string", "null"]}
       },

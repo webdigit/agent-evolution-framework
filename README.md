@@ -9,6 +9,14 @@ AEF is useful when you want an agent to improve within explicit boundaries:
 work can produce evidence and promotion recommendations, but authority and
 level changes remain controlled by policy and explicit human decisions.
 
+AEF is a **project runtime**, not an editor plugin. A skill or a hook can
+remind an agent what to do; it cannot refuse a write, cap evidence, replay to
+`NO_CHANGE`, or hold a promotion until a human decides. Those guarantees have
+to survive the next harness and an agent that forgets the skill. That is why
+installation goes through Python: the CLI is the court, `.agent/` is the
+docket, and the model is a party — not the judge. See
+[Concepts](docs/concepts.md#a-runtime-not-a-harness-plugin).
+
 ## Install
 
 AEF V1 requires Python 3.11 or later. Install the tagged source from GitHub
@@ -67,22 +75,22 @@ In plain language, you can now tell your agent: “Use this project's AEF rules,
 record evidence from completed work, and tell me when a promotion review is
 available.” AEF keeps the resulting state inspectable and replay-safe.
 
-## Activate AEF guidance in Claude Code
+## Activate AEF guidance for agents
 
 ```console
-aef integrate claude
+aef integrate all
 aef integrate claude --status
 ```
 
-The integration modifies only the managed segment in
-`.claude/CLAUDE.md` inside this project and imports the five AEF doctrine
-files. It does not write user-level Claude settings, install hooks, or modify a
-root `CLAUDE.md`.
+The integration installs a managed segment in project-root `AGENTS.md` (doctrine
+citations) plus doorbells `CLAUDE.md` / `GEMINI.md`. It does not write
+user-level Claude settings, install hooks, or create a new fat
+`.claude/CLAUDE.md` bridge. An existing brownfield bridge is left alone.
 
-The Claude bridge is **guidance-only**. It does not technically enforce tool
-use, grant authority, or allow Claude to approve, reject, or recover an
-evaluation without an explicit user request. See
-[Claude integration](docs/claude-integration.md).
+Guidance is **guidance-only**. It does not technically enforce tool use, grant
+authority, or allow an agent to approve, reject, or recover an evaluation
+without an explicit user request. See
+[Claude and agent guidance](docs/claude-integration.md).
 
 ## Essential commands
 
@@ -95,7 +103,7 @@ aef discover --snapshot connectors.json
 aef consolidate --reviews reviews.json
 aef evaluate --list
 aef evaluate --decisions decisions.json
-aef integrate claude --status
+aef integrate all --status
 ```
 
 Use `--dry-run` on supported modifying commands to inspect the planned result.
@@ -116,6 +124,7 @@ The complete syntax, output modes, and exit codes are documented in
 - [Getting started](docs/getting-started.md)
 - [Claude project integration](docs/claude-integration.md)
 - [Command reference](docs/commands.md)
+- [Properties](docs/properties.md)
 - [Canonical input files](docs/input-files.md)
 - [Core concepts](docs/concepts.md)
 - [Evaluation recovery](docs/recovery.md)

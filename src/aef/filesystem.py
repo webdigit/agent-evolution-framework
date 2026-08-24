@@ -5,6 +5,8 @@ import os
 import stat
 import tempfile
 import hashlib
+import contextlib
+import threading
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -25,6 +27,9 @@ JSON_PATHS = {
 }
 EVALUATION_TRANSACTION_PATH = ".agent/state/evaluation-transaction.json"
 UPGRADE_TRANSACTION_PATH = ".agent/state/upgrade-transaction.json"
+COMPETENCY_DECLARATION_TRANSACTION_PATH = (
+    ".agent/state/competency-declaration-transaction.json"
+)
 RECORDS_DIRECTORY = ".agent/records"
 
 WINDOWS_RESERVED_NAMES = {
@@ -48,6 +53,119 @@ class UpgradeRecoveryRequiredError(RuntimeError):
     """Raised when ordinary writes encounter an unfinished UPGRADE transaction."""
 
     code = "upgrade_recovery_required"
+
+
+class CompetencyDeclarationRecoveryRequiredError(RuntimeError):
+    """Raised when ordinary writes encounter an unfinished declaration transaction."""
+
+    code = "competency_declaration_recovery_required"
+
+
+class WorkspaceContentionError(RuntimeError):
+    """Raised when a workspace snapshot is stale under concurrent mutation."""
+
+    code = "workspace_contention"
+
+
+_WORKSPACE_LOCK_STATE = threading.local()
+WORKSPACE_MUTATION_LOCK_PATH = ".agent/state/.workspace-mutation.lock"
+WORKSPACE_MUTATION_LOCK_FALLBACK_PATH = ".aef-workspace-mutation.lock"
+WORKSPACE_INTERNAL_PATHS = frozenset({
+    WORKSPACE_MUTATION_LOCK_PATH,
+    WORKSPACE_MUTATION_LOCK_FALLBACK_PATH,
+})
+
+
+def _workspace_mutation_lock_path(root: Path) -> Path:
+    if (root / ".agent").is_dir():
+        return root / WORKSPACE_MUTATION_LOCK_PATH
+    return root / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+
+
+def _is_workspace_transient_path(rel_path: str) -> bool:
+    """Return true for runtime-only paths that must not appear in snapshots."""
+    if rel_path in WORKSPACE_INTERNAL_PATHS:
+        return True
+    return PurePosixPath(rel_path).name.endswith(".tmp")
+
+
+def _cleanup_workspace_mutation_lock_fallback(root: Path) -> None:
+    """Remove the pre-init fallback lock once the canonical workspace exists."""
+    if not (root / ".agent").is_dir():
+        return
+    fallback = root / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+    if fallback.is_file():
+        try:
+            fallback.unlink()
+        except OSError:
+            pass
+
+
+_WORKSPACE_GITIGNORE_LINES = (
+    "# AEF runtime workspace locks — do not commit.",
+    ".aef-workspace-mutation.lock",
+    ".agent/state/.workspace-mutation.lock",
+)
+
+
+def ensure_workspace_gitignore(root: str | Path) -> None:
+    """Ensure runtime lock paths stay out of version control after init."""
+    resolved = Path(root).resolve()
+    path = resolved / ".gitignore"
+    block = "\n".join(_WORKSPACE_GITIGNORE_LINES) + "\n"
+    if path.is_file():
+        existing = path.read_text(encoding="utf-8")
+        if all(line in existing for line in _WORKSPACE_GITIGNORE_LINES[1:]):
+            return
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        path.write_text(existing + block, encoding="utf-8", newline="\n")
+        return
+    path.write_text(block, encoding="utf-8", newline="\n")
+
+
+@contextlib.contextmanager
+def workspace_mutation_lock(root: str | Path):
+    """Serialize workspace mutations and reject stale apply snapshots."""
+    resolved = Path(root).resolve()
+    held = getattr(_WORKSPACE_LOCK_STATE, "root", None)
+    if held == resolved:
+        yield
+        return
+    lock_path = _workspace_mutation_lock_path(resolved)
+    fallback_path = resolved / WORKSPACE_MUTATION_LOCK_FALLBACK_PATH
+    if lock_path != fallback_path and fallback_path.is_file():
+        try:
+            fallback_path.unlink()
+        except OSError:
+            pass
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        _WORKSPACE_LOCK_STATE.root = resolved
+        try:
+            yield
+        finally:
+            _WORKSPACE_LOCK_STATE.root = None
+    finally:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+        _cleanup_workspace_mutation_lock_fallback(resolved)
 
 
 TRANSACTION_BUSINESS_PATHS = frozenset({
@@ -203,6 +321,17 @@ def _upgrade_transaction_entry_present(root: Path) -> bool:
     return True
 
 
+def _competency_declaration_transaction_entry_present(root: Path) -> bool:
+    path = root.joinpath(*COMPETENCY_DECLARATION_TRANSACTION_PATH.split("/"))
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
@@ -223,7 +352,14 @@ def load_workspace(root: str | Path) -> dict[str, Any]:
 
     for path in sorted(p for p in agent_dir.rglob("*") if p.is_file()):
         rel = _relative_posix(path, root)
-        raw = path.read_text(encoding="utf-8")
+        if _is_workspace_transient_path(rel):
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise WorkspaceContentionError(
+                "workspace changed while it was being loaded"
+            ) from exc
 
         if rel in JSON_PATHS or path.suffix.lower() == ".json":
             try:
@@ -282,6 +418,27 @@ def is_link_or_reparse_point(path: Path) -> bool:
 
 
 _is_link_or_reparse_point = is_link_or_reparse_point
+
+
+def file_is_readonly(path: Path) -> bool:
+    """True when an existing path must not be replaced (matches upgrade_ops)."""
+    if not path.exists():
+        return False
+    if is_link_or_reparse_point(path):
+        return True
+    if not os.access(path, os.W_OK):
+        return True
+    try:
+        if not (path.stat().st_mode & stat.S_IWRITE):
+            return True
+    except OSError:
+        return True
+    return False
+
+
+def copy_file_mode(source: Path, destination: Path) -> None:
+    """Copy POSIX permission bits from an existing file onto a replacement."""
+    os.chmod(destination, stat.S_IMODE(source.stat().st_mode))
 
 
 def validate_workspace_rel_path(rel_path: str) -> tuple[str, ...]:
@@ -597,33 +754,64 @@ def apply_workspace(
         mutation_paths.update(diff["removed"])
     if not mutation_paths:
         return diff
-    current_files = current.get("files", {}) if isinstance(current, dict) else {}
-    if EVALUATION_TRANSACTION_PATH in current_files:
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
+    with workspace_mutation_lock(root):
+        render_workspace_plan(current, prepared)
+        _validate_workspace_plan(root, diff)
+        fresh = load_workspace(root)
+        fresh_files = fresh.get("files") or {}
+        current_files = current.get("files", {}) if isinstance(current, dict) else {}
+        if (
+            EVALUATION_TRANSACTION_PATH in fresh_files
+            or EVALUATION_TRANSACTION_PATH in current_files
+        ):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if _evaluation_transaction_entry_present(root):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if (
+            UPGRADE_TRANSACTION_PATH in fresh_files
+            or UPGRADE_TRANSACTION_PATH in current_files
+        ):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if _upgrade_transaction_entry_present(root):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if (
+            COMPETENCY_DECLARATION_TRANSACTION_PATH in fresh_files
+            or COMPETENCY_DECLARATION_TRANSACTION_PATH in current_files
+        ):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        if _competency_declaration_transaction_entry_present(root):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        if fresh_files != current_files:
+            raise WorkspaceContentionError(
+                "workspace changed since it was loaded for mutation"
+            )
+        if _evaluation_transaction_entry_present(root):
+            raise EvaluationRecoveryRequiredError(
+                "evaluation recovery is required before workspace mutation"
+            )
+        if _upgrade_transaction_entry_present(root):
+            raise UpgradeRecoveryRequiredError(
+                "upgrade recovery is required before workspace mutation"
+            )
+        if _competency_declaration_transaction_entry_present(root):
+            raise CompetencyDeclarationRecoveryRequiredError(
+                "competency declaration recovery is required before workspace mutation"
+            )
+        return _apply_workspace_unchecked(
+            root, current, desired, allow_delete=allow_delete
         )
-    if _evaluation_transaction_entry_present(root):
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
-        )
-    # Reinspect immediately before entering the ordinary writer. This narrows
-    # the non-hostile TOCTOU window without claiming native handle-relative
-    # protection in the V1 threat model.
-    if _evaluation_transaction_entry_present(root):
-        raise EvaluationRecoveryRequiredError(
-            "evaluation recovery is required before workspace mutation"
-        )
-    if UPGRADE_TRANSACTION_PATH in current_files:
-        raise UpgradeRecoveryRequiredError(
-            "upgrade recovery is required before workspace mutation"
-        )
-    if _upgrade_transaction_entry_present(root):
-        raise UpgradeRecoveryRequiredError(
-            "upgrade recovery is required before workspace mutation"
-        )
-    return _apply_workspace_unchecked(
-        root, current, desired, allow_delete=allow_delete
-    )
 
 
 def snapshot_workspace(root: str | Path) -> dict[str, Any]:

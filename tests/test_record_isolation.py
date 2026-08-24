@@ -59,6 +59,8 @@ def init_workspace(tmp_path: Path, capsys):
 
 
 def snapshot_agent(root: Path) -> dict[str, bytes]:
+    from aef.filesystem import WORKSPACE_INTERNAL_PATHS
+
     agent = root / ".agent"
     if not agent.exists():
         return {}
@@ -66,6 +68,7 @@ def snapshot_agent(root: Path) -> dict[str, bytes]:
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in agent.rglob("*")
         if path.is_file()
+        and path.relative_to(root).as_posix() not in WORKSPACE_INTERNAL_PATHS
     }
 
 

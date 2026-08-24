@@ -678,6 +678,27 @@ def test_non_tty_evaluate_without_explicit_action_never_prompts(tmp_path):
     assert "Approve / Reject / Later" not in completed.stderr
 
 
+def test_evaluate_without_decisions_does_not_promote(tmp_path):
+    apply_workspace(tmp_path, load_workspace(tmp_path), project(PENDING))
+    career_path = tmp_path / ".agent" / "state" / "career.json"
+    evaluations_path = tmp_path / ".agent" / "state" / "evaluations.json"
+    before_career = career_path.read_bytes()
+    before_evaluations = evaluations_path.read_bytes()
+    before_level = json.loads(before_career.decode("utf-8"))["level"]
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "aef", "--json", "--workspace", str(tmp_path),
+         "evaluate"],
+        input="", capture_output=True, text=True, check=False,
+    )
+
+    assert completed.returncode == 3
+    assert json.loads(completed.stdout)["error"]["code"] == "interactive_input_required"
+    assert career_path.read_bytes() == before_career
+    assert evaluations_path.read_bytes() == before_evaluations
+    assert json.loads(career_path.read_text(encoding="utf-8"))["level"] == before_level == "L1"
+
+
 def test_cli_recover_dry_run_then_application_is_idempotent(tmp_path):
     from aef.evaluation_transaction import TRANSACTION_PATH, apply_evaluation_transaction
 
@@ -888,6 +909,36 @@ def test_transaction_rejects_non_strict_or_noncanonical_embedded_content(invalid
     journal["files"][0]["before_hash"] = _sha256_bytes(invalid_content)
 
     with pytest.raises(InvalidEvaluationTransactionError):
+        validate_evaluation_transaction(journal)
+
+
+def test_duplicate_key_in_embedded_journal_content_keeps_pre_lot1_error_contract():
+    """Shared reject_duplicate_keys must not change EVALUATE journal diagnostics."""
+    from aef.evaluation_transaction import (
+        InvalidEvaluationTransactionError,
+        _parse_strict_content,
+        _sha256_bytes,
+        build_evaluation_transaction,
+        validate_evaluation_transaction,
+    )
+
+    duplicate = '{"phase":"prepared","phase":"committed"}\n'
+    with pytest.raises(
+        InvalidEvaluationTransactionError,
+        match=r"^invalid evaluation transaction JSON content$",
+    ) as raised:
+        _parse_strict_content(duplicate)
+    assert raised.value.__cause__ is not None
+
+    source, decisions = mixed_project_and_decisions()
+    _, desired, _ = evaluation_engine.evaluate_project(source, decisions)
+    journal = build_evaluation_transaction(source, desired, decisions)
+    journal["files"][0]["before_content"] = duplicate
+    journal["files"][0]["before_hash"] = _sha256_bytes(duplicate)
+    with pytest.raises(
+        InvalidEvaluationTransactionError,
+        match=r"^invalid evaluation transaction JSON content$",
+    ):
         validate_evaluation_transaction(journal)
 
 

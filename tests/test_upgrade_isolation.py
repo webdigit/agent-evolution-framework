@@ -72,6 +72,7 @@ def test_upgrade_does_not_create_bootstrap(tmp_path, capsys):
     invoke(capsys, "--json", "--workspace", str(tmp_path), "upgrade")
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "GEMINI.md").exists()
 
 
 def test_comment_manual_user_validation_gate():

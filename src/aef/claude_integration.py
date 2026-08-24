@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .markdown_code import classify_managed_markers, place_managed_segment
 from .transaction_guard import mutation_guard_metadata
 
 
@@ -78,42 +79,12 @@ def validate_claude_integration_workspace(project):
 
 def inspect_managed_bridge(existing):
     """Classify one bridge without normalizing any surrounding bytes."""
-    if existing is None or existing == b"":
-        return {"state": "absent", "version": None, "start": None, "end": None}
-    begin_count = existing.count(BEGIN_PREFIX)
-    end_count = existing.count(END_MARKER)
-    if begin_count == 0 and end_count == 0:
-        return {"state": "absent", "version": None, "start": None, "end": None}
-    if begin_count != 1 or end_count != 1:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    begin = existing.index(BEGIN_PREFIX)
-    end_marker = existing.index(END_MARKER)
-    if end_marker < begin:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    line_end = existing.find(b" -->", begin)
-    if line_end < 0 or line_end > existing.find(b"\n", begin):
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    version_raw = existing[begin + len(BEGIN_PREFIX):line_end]
-    if len(version_raw) < 2 or version_raw[:1] != b'"' or version_raw[-1:] != b'"':
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    try:
-        version = version_raw[1:-1].decode("ascii")
-    except UnicodeDecodeError:
-        return {"state": "ambiguous", "version": None, "start": None, "end": None}
-    body_end = end_marker + len(END_MARKER)
-    if existing[body_end:body_end + 1] == b"\n":
-        body_end += 1
-    start = begin
-    if begin >= 2 and existing[begin - 2:begin] == b"\n\n":
-        start = begin - 2
-    expected = BRIDGE_CATALOG.get(version)
-    if expected is None:
-        state = "unsupported_version"
-    elif existing[begin:body_end] != expected:
-        state = "modified"
-    else:
-        state = "installed"
-    return {"state": state, "version": version, "start": start, "end": body_end}
+    return classify_managed_markers(
+        existing,
+        begin_prefix=BEGIN_PREFIX,
+        end_marker=END_MARKER,
+        catalog=BRIDGE_CATALOG,
+    )
 
 
 def plan_claude_integration(project, existing, *, remove=False, status_only=False):
@@ -183,7 +154,7 @@ def plan_claude_integration(project, existing, *, remove=False, status_only=Fals
             **base, "reason": None, "desired_bytes": desired,
             "integration_version": CLAUDE_INTEGRATION_VERSION,
         }
-    desired = CLAUDE_BRIDGE_BYTES if not existing else existing + b"\n\n" + CLAUDE_BRIDGE_BYTES
+    desired = place_managed_segment(existing, CLAUDE_BRIDGE_BYTES)
     return "CHANGE", deepcopy(project), {
         **base, "reason": None, "desired_bytes": desired,
         "integration_version": CLAUDE_INTEGRATION_VERSION,

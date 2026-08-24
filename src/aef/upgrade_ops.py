@@ -9,6 +9,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .competency_declaration_transaction import (
+    declaration_transaction_entry_present,
+    declaration_transaction_present,
+)
 from .filesystem import (
     EVALUATION_TRANSACTION_PATH,
     WorkspacePathError,
@@ -16,6 +20,7 @@ from .filesystem import (
     _validate_workspace_path,
     is_link_or_reparse_point,
     load_workspace,
+    workspace_mutation_lock,
 )
 from .init_profiles import get_init_profile
 from .transaction_guard import evaluation_recovery_required
@@ -49,9 +54,6 @@ from .upgrade_transaction import (
     upgrade_transaction_present,
     validate_upgrade_transaction,
 )
-
-
-BOOTSTRAP_NAMES = ("AGENTS.md", "CLAUDE.md")
 
 
 class UpgradeBlocked(Exception):
@@ -151,15 +153,6 @@ def _preflight_paths(root: Path, paths: list[str], current_files: dict[str, Any]
             raise UpgradeBlocked("managed_file_not_replaceable")
         if target.exists() and is_link_or_reparse_point(target):
             raise UpgradeBlocked("workspace_path_unsafe")
-
-
-def _preserve_bootstrap(root: Path, desired: dict[str, Any], current: dict[str, Any]) -> None:
-    for name in BOOTSTRAP_NAMES:
-        path = root / name
-        if path.exists():
-            continue
-        if name in desired.get("files", {}) or name in current.get("files", {}):
-            raise UpgradeBlocked("bootstrap_create_forbidden")
 
 
 def _machine(
@@ -334,6 +327,10 @@ def run_upgrade(
             extra["reason"] = "evaluation_recovery_required"
             extra["meta"] = {"reason": "evaluation_recovery_required"}
             return "BLOCKED", _machine(project, None, compatibility="blocked"), extra
+        if declaration_transaction_present(project) or declaration_transaction_entry_present(root):
+            extra["reason"] = "competency_declaration_recovery_required"
+            extra["meta"] = {"reason": "competency_declaration_recovery_required"}
+            return "BLOCKED", _machine(project, None, compatibility="blocked"), extra
 
         plan = _project_plan(project, registry)
         if plan.status == "BLOCKED":
@@ -356,7 +353,6 @@ def run_upgrade(
             extra["meta"] = {"reason": bound}
             return "BLOCKED", _machine(project, plan, compatibility="blocked"), extra
         _preflight_paths(root, paths, project.get("files", {}))
-        _preserve_bootstrap(root, desired, project)
         journal = _journal_from_states(project, desired, plan, sorted(paths))
         result = _machine(
             project, plan, compatibility="upgrade_required",
@@ -388,32 +384,33 @@ def _apply_transaction(
     result: dict[str, Any],
     extra: dict[str, Any],
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    prepared_project = deepcopy(project)
-    prepared_project.setdefault("files", {})[UPGRADE_TRANSACTION_PATH] = journal
-    _apply_workspace_unchecked(root, project, prepared_project, allow_delete=False)
+    with workspace_mutation_lock(root):
+        prepared_project = deepcopy(project)
+        prepared_project.setdefault("files", {})[UPGRADE_TRANSACTION_PATH] = journal
+        _apply_workspace_unchecked(root, project, prepared_project, allow_delete=False)
 
-    mutating = deepcopy(prepared_project)
-    for path, value in desired.get("files", {}).items():
-        mutating["files"][path] = deepcopy(value)
-    _apply_workspace_unchecked(root, prepared_project, mutating, allow_delete=False)
+        mutating = deepcopy(prepared_project)
+        for path, value in desired.get("files", {}).items():
+            mutating["files"][path] = deepcopy(value)
+        _apply_workspace_unchecked(root, prepared_project, mutating, allow_delete=False)
 
-    for entry in journal["files"]:
-        observed = _observe_file(root, entry["path"])
-        if observed is None or sha256_text(observed) != entry["after_hash"]:
-            extra["reason"] = "hash_mismatch"
-            extra["meta"] = {"reason": "hash_mismatch"}
-            return "BLOCKED", result, extra
+        for entry in journal["files"]:
+            observed = _observe_file(root, entry["path"])
+            if observed is None or sha256_text(observed) != entry["after_hash"]:
+                extra["reason"] = "hash_mismatch"
+                extra["meta"] = {"reason": "hash_mismatch"}
+                return "BLOCKED", result, extra
 
-    committed = deepcopy(journal)
-    committed["phase"] = "committed"
-    committed_project = deepcopy(mutating)
-    committed_project["files"][UPGRADE_TRANSACTION_PATH] = committed
-    _apply_workspace_unchecked(root, mutating, committed_project, allow_delete=False)
+        committed = deepcopy(journal)
+        committed["phase"] = "committed"
+        committed_project = deepcopy(mutating)
+        committed_project["files"][UPGRADE_TRANSACTION_PATH] = committed
+        _apply_workspace_unchecked(root, mutating, committed_project, allow_delete=False)
 
-    final = load_workspace(root)
-    cleanup = deepcopy(final)
-    cleanup.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
-    _apply_workspace_unchecked(root, final, cleanup, allow_delete=True)
+        final = load_workspace(root)
+        cleanup = deepcopy(final)
+        cleanup.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
+        _apply_workspace_unchecked(root, final, cleanup, allow_delete=True)
     extra["diff"] = extra.get("diff") or {
         "created": [], "modified": [], "removed": [],
     }
@@ -488,6 +485,10 @@ def _recover(
         return "NO_CHANGE", _machine(
             project, None, compatibility="current", recovery_action="none",
         ), extra
+    if evaluation_recovery_required(project) or EVALUATION_TRANSACTION_PATH in project.get("files", {}):
+        return _blocked_recover(project, extra, "evaluation_recovery_required")
+    if declaration_transaction_present(project) or declaration_transaction_entry_present(root):
+        return _blocked_recover(project, extra, "competency_declaration_recovery_required")
     try:
         journal = validate_upgrade_transaction(raw)
     except (InvalidUpgradeTransactionError, TypeError, ValueError):
@@ -536,26 +537,27 @@ def _recover(
         extra["diff"] = {"created": [], "modified": [], "removed": []}
         return "CHANGE", result, extra
 
-    if action == "rollback":
-        restored = deepcopy(project)
-        for entry in journal["files"]:
-            if entry["path"] in journal["created_paths"]:
-                restored.get("files", {}).pop(entry["path"], None)
-            else:
-                from .strict_json import validate_strict_json
-                import json as _json
-                try:
-                    parsed = _json.loads(entry["before_content"])
-                    validate_strict_json(parsed)
-                    restored.setdefault("files", {})[entry["path"]] = parsed
-                except Exception:
-                    restored.setdefault("files", {})[entry["path"]] = entry["before_content"]
-        restored.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
-        _apply_workspace_unchecked(root, project, restored, allow_delete=True)
-    else:
-        cleanup = deepcopy(project)
-        cleanup.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
-        _apply_workspace_unchecked(root, project, cleanup, allow_delete=True)
+    with workspace_mutation_lock(root):
+        if action == "rollback":
+            restored = deepcopy(project)
+            for entry in journal["files"]:
+                if entry["path"] in journal["created_paths"]:
+                    restored.get("files", {}).pop(entry["path"], None)
+                else:
+                    from .strict_json import validate_strict_json
+                    import json as _json
+                    try:
+                        parsed = _json.loads(entry["before_content"])
+                        validate_strict_json(parsed)
+                        restored.setdefault("files", {})[entry["path"]] = parsed
+                    except Exception:
+                        restored.setdefault("files", {})[entry["path"]] = entry["before_content"]
+            restored.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
+            _apply_workspace_unchecked(root, project, restored, allow_delete=True)
+        else:
+            cleanup = deepcopy(project)
+            cleanup.get("files", {}).pop(UPGRADE_TRANSACTION_PATH, None)
+            _apply_workspace_unchecked(root, project, cleanup, allow_delete=True)
     extra["diff"] = {
         "created": [],
         "modified": [],

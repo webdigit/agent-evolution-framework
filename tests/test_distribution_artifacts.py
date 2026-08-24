@@ -23,7 +23,14 @@ def _wheel(path, *, schemas=SCHEMAS, extra=()):
             archive.writestr(_zip_info(name), "local")
 
 
-def _sdist(path, extra=(), extra_named=None, duplicates=(), extra_infos=()):
+def _sdist(
+    path,
+    extra=(),
+    extra_named=None,
+    duplicates=(),
+    extra_infos=(),
+    include_suite_resources=True,
+):
     files = {
         "agent-evolution-framework-0.1.0/README.md": b"README",
         "agent-evolution-framework-0.1.0/pyproject.toml": b"[project]",
@@ -31,11 +38,17 @@ def _sdist(path, extra=(), extra_named=None, duplicates=(), extra_infos=()):
         "agent-evolution-framework-0.1.0/docs/examples/reviews.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/evaluation-decisions.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/ingest.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/competency-declaration.json": b"{}",
         **{
             f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
             for schema in SCHEMAS
         },
     }
+    if include_suite_resources:
+        files["agent-evolution-framework-0.1.0/scripts/verify_artifacts.py"] = b""
+        files["agent-evolution-framework-0.1.0/fixtures/minimal/manifest.json"] = b"{}"
+        files["agent-evolution-framework-0.1.0/.github/workflows/ci.yml"] = b"name: CI\n"
     for name in extra:
         files[f"agent-evolution-framework-0.1.0/{name}"] = b"private"
     files.update(extra_named or {})
@@ -77,7 +90,12 @@ def test_release_artifact_inspector_rejects_unexpected_schema(tmp_path):
 
 
 def test_record_runtime_schemas_are_required_in_artifact_contract():
-    assert {"record-submission.schema.json", "record.schema.json"} <= SCHEMAS
+    assert {
+        "record-submission.schema.json",
+        "record.schema.json",
+        "ingest-submission.schema.json",
+        "competency-declaration-submission.schema.json",
+    } <= SCHEMAS
 
 
 def test_upgrade_transaction_schema_is_required_in_artifact_contract():
@@ -205,3 +223,82 @@ def test_release_artifact_inspector_rejects_non_regular_sdist_member(
     _sdist(sdist, extra_infos=[info])
     with pytest.raises(ValueError, match="non-regular archive member"):
         inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_sdist_missing_scripts(tmp_path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(sdist, include_suite_resources=False)
+    with pytest.raises(ValueError, match="missing scripts"):
+        inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_sdist_missing_fixtures(tmp_path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(
+        sdist,
+        include_suite_resources=False,
+        extra_named={
+            "agent-evolution-framework-0.1.0/scripts/verify_artifacts.py": b"#",
+        },
+    )
+    with pytest.raises(ValueError, match="missing fixtures"):
+        inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_sdist_missing_github(tmp_path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(
+        sdist,
+        include_suite_resources=False,
+        extra_named={
+            "agent-evolution-framework-0.1.0/scripts/verify_artifacts.py": b"#",
+            "agent-evolution-framework-0.1.0/fixtures/minimal/manifest.json": b"{}",
+        },
+    )
+    with pytest.raises(ValueError, match="missing .github"):
+        inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_wheel_containing_scripts(tmp_path):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=["scripts/verify_artifacts.py"])
+    with pytest.raises(ValueError, match="wheel contains scripts"):
+        inspect_artifact(wheel)
+
+
+def test_release_artifact_inspector_rejects_wheel_containing_fixtures(tmp_path):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=["fixtures/minimal/manifest.json"])
+    with pytest.raises(ValueError, match="wheel contains fixtures"):
+        inspect_artifact(wheel)
+
+
+@pytest.mark.parametrize(
+    "member, fragment",
+    [
+        ("tests/test_x.py", "tests"),
+        ("tests/adversarial/14-ecrivain-externe.py", "tests"),
+        ("docs/x.md", "docs"),
+        (".github/workflows/ci.yml", ".github"),
+        ("src/aef/__init__.py", "src"),
+    ],
+)
+def test_release_artifact_inspector_rejects_wheel_containing_non_runtime_tree(
+    tmp_path, member, fragment
+):
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=[member])
+    with pytest.raises(ValueError, match=f"wheel contains {fragment}"):
+        inspect_artifact(wheel)
+
+
+def test_verify_artifacts_cli_prints_one_error_line_and_exits_1(tmp_path, capsys):
+    from scripts.verify_artifacts import main
+
+    wheel = tmp_path / "aef-0.1.0-py3-none-any.whl"
+    _wheel(wheel, extra=["tests/test_x.py"])
+    assert main([str(wheel)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: wheel contains tests/\n"
+    assert "Traceback" not in captured.err

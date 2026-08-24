@@ -12,7 +12,7 @@ from .filesystem import (
     load_workspace,
     plan_workspace,
 )
-from .strict_json import InvalidStrictJSONError, validate_strict_json
+from .strict_json import InvalidStrictJSONError, reject_duplicate_keys, validate_strict_json
 
 
 TRANSACTION_PATH = EVALUATION_TRANSACTION_PATH
@@ -67,14 +67,6 @@ def decision_batch_digest(document):
 def _parse_strict_content(content):
     def reject_constant(value):
         raise ValueError(f"invalid JSON constant: {value}")
-
-    def reject_duplicate_keys(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError("duplicate JSON key")
-            out[key] = value
-        return out
 
     try:
         parsed = json.loads(
@@ -279,6 +271,24 @@ def recover_evaluation_transaction(root, current, *, dry_run=False):
     if journal is None:
         return "NO_CHANGE", deepcopy(current), {
             "reason": None, "transaction_id": None, "action": "none",
+        }
+    from .competency_declaration_transaction import (
+        declaration_transaction_entry_present,
+        declaration_transaction_present,
+    )
+    from .upgrade_transaction import (
+        upgrade_transaction_entry_present,
+        upgrade_transaction_present,
+    )
+    if upgrade_transaction_present(current) or upgrade_transaction_entry_present(root):
+        return "BLOCKED", deepcopy(current), {
+            "reason": "upgrade_recovery_required",
+            "transaction_id": None, "action": "none",
+        }
+    if declaration_transaction_present(current) or declaration_transaction_entry_present(root):
+        return "BLOCKED", deepcopy(current), {
+            "reason": "competency_declaration_recovery_required",
+            "transaction_id": None, "action": "none",
         }
     validate_evaluation_transaction(journal)
     states = []

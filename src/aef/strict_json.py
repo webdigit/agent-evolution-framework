@@ -9,6 +9,24 @@ class InvalidStrictJSONError(ValueError):
         super().__init__(message)
 
 
+class DuplicateJSONKeyError(ValueError):
+    """Raised when a JSON object contains the same key more than once."""
+
+    def __init__(self, key):
+        self.key = key
+        super().__init__(f"duplicate JSON key: {key!r}")
+
+
+def reject_duplicate_keys(pairs):
+    """object_pairs_hook that rejects duplicate keys at every object depth."""
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise DuplicateJSONKeyError(key)
+        out[key] = value
+    return out
+
+
 def validate_strict_json(value):
     """Validate JSON values recursively without coercing keys or values."""
     active = set()

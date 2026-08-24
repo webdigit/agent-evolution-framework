@@ -6,13 +6,21 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .competency_declaration_transaction import (
+    declaration_transaction_entry_present,
+    declaration_transaction_present,
+)
 from .filesystem import (
     RECORDS_DIRECTORY,
+    CompetencyDeclarationRecoveryRequiredError,
+    EvaluationRecoveryRequiredError,
     UpgradeRecoveryRequiredError,
+    _evaluation_transaction_entry_present,
     apply_workspace,
     is_link_or_reparse_point,
     load_workspace,
 )
+from .transaction_guard import evaluation_recovery_required
 from .upgrade_transaction import (
     upgrade_transaction_entry_present,
     upgrade_transaction_present,
@@ -70,6 +78,14 @@ def persist_record(
     if upgrade_transaction_present(current) or upgrade_transaction_entry_present(root):
         raise UpgradeRecoveryRequiredError(
             "upgrade recovery is required before workspace mutation"
+        )
+    if evaluation_recovery_required(current) or _evaluation_transaction_entry_present(root):
+        raise EvaluationRecoveryRequiredError(
+            "evaluation recovery is required before workspace mutation"
+        )
+    if declaration_transaction_present(current) or declaration_transaction_entry_present(root):
+        raise CompetencyDeclarationRecoveryRequiredError(
+            "competency declaration recovery is required before workspace mutation"
         )
 
     if _entry_exists(records_dir):
