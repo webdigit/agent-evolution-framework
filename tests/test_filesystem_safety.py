@@ -658,4 +658,3 @@ def test_apply_succeeds_when_snapshot_matches_disk(tmp_path: Path):
     assert ".agent/state/other.txt" in diff["created"]
     assert (tmp_path / ".agent/state/other.txt").read_text(encoding="utf-8") == "added"
     assert (tmp_path / ".agent/state/note.txt").read_text(encoding="utf-8") == "original"
-
