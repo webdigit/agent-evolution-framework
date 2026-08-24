@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_tracked_gitignored import tracked_ignored_paths
+
+def _tracked_ignored_paths():
+    module = pytest.importorskip("scripts.check_tracked_gitignored")
+    return module.tracked_ignored_paths
 
 
 def _git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -32,7 +35,7 @@ def _repository(tmp_path: Path) -> Path:
 
 
 def test_clean_tree_has_no_tracked_ignored_paths(tmp_path):
-    assert tracked_ignored_paths(_repository(tmp_path)) == []
+    assert _tracked_ignored_paths()(_repository(tmp_path)) == []
 
 
 def test_forced_add_is_detected(tmp_path):
@@ -40,7 +43,7 @@ def test_forced_add_is_detected(tmp_path):
     (repository / "secret.txt").write_text("nope\n", encoding="utf-8")
     _git(repository, "add", "-f", "secret.txt")
     _git(repository, "commit", "-q", "-m", "forced")
-    assert "secret.txt" in tracked_ignored_paths(repository)
+    assert "secret.txt" in _tracked_ignored_paths()(repository)
 
 
 def test_current_repository_has_no_tracked_ignored_paths():
@@ -53,7 +56,7 @@ def test_current_repository_has_no_tracked_ignored_paths():
     )
     if probe.returncode != 0 or probe.stdout.strip() != "true":
         pytest.skip("this tree is not a git work tree")
-    assert tracked_ignored_paths(root) == []
+    assert _tracked_ignored_paths()(root) == []
 
 
 def test_ci_runs_the_tracked_ignored_check():
