@@ -48,6 +48,7 @@ def _sdist(
     if include_suite_resources:
         files["agent-evolution-framework-0.1.0/scripts/verify_artifacts.py"] = b""
         files["agent-evolution-framework-0.1.0/fixtures/minimal/manifest.json"] = b"{}"
+        files["agent-evolution-framework-0.1.0/.github/workflows/ci.yml"] = b"name: CI\n"
     for name in extra:
         files[f"agent-evolution-framework-0.1.0/{name}"] = b"private"
     files.update(extra_named or {})
@@ -241,6 +242,20 @@ def test_release_artifact_inspector_rejects_sdist_missing_fixtures(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="missing fixtures"):
+        inspect_artifact(sdist)
+
+
+def test_release_artifact_inspector_rejects_sdist_missing_github(tmp_path):
+    sdist = tmp_path / "aef-0.1.0.tar.gz"
+    _sdist(
+        sdist,
+        include_suite_resources=False,
+        extra_named={
+            "agent-evolution-framework-0.1.0/scripts/verify_artifacts.py": b"#",
+            "agent-evolution-framework-0.1.0/fixtures/minimal/manifest.json": b"{}",
+        },
+    )
+    with pytest.raises(ValueError, match="missing .github"):
         inspect_artifact(sdist)
 
 

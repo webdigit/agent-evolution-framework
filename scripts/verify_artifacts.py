@@ -216,6 +216,8 @@ def inspect_artifact(path: Path) -> dict[str, object]:
             raise ValueError("sdist is missing scripts/")
         if not any("/fixtures/" in name for name in names):
             raise ValueError("sdist is missing fixtures/")
+        if not any("/.github/" in name and name.endswith(".yml") for name in names):
+            raise ValueError("sdist is missing .github/")
     if path.suffix == ".whl":
         names = [member.as_posix() for member in normalized]
         for tree in WHEEL_FORBIDDEN_TREES:

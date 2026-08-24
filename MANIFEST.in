@@ -6,6 +6,7 @@ recursive-include tests *
 recursive-exclude tests __pycache__
 recursive-include scripts *.py
 recursive-include fixtures *
+recursive-include .github *.yml
 global-exclude *.py[cod]
 recursive-include docs *.md *.json
 prune docs/prompts
