@@ -1,16 +1,22 @@
-# Banc de tests adversariaux
+# Adversarial banc
 
-Ces scripts attaquent AEF **par l'extérieur** : ils lancent la vraie CLI sur de vrais workspaces jetables, en concurrence, sous charge, et face à des contenus hostiles. Ils complètent la suite `pytest` — ils ne la remplacent pas.
+These scripts attack AEF **from the outside**: they drive the real CLI against
+throwaway workspaces, under concurrency, under load, and against hostile
+content. They complement the `pytest` suite — they do not replace it.
 
-La distinction compte. La suite vérifie que le code fait ce qu'on attend sur les chemins prévus. Ce banc vérifie que les **garanties tiennent** face à ce qui n'était pas prévu : un dépôt cloné contenant des liens sortants ou une archive piégée, huit processus concurrents, une interruption au milieu d'une écriture, un fichier en lecture seule, un marqueur cité dans un bloc de code.
+The distinction matters. The suite checks that the code does what we expect on
+the paths we planned. This banc checks that the **guarantees still hold**
+against what was not planned: a cloned repository with outbound links or a
+trapped archive, eight concurrent processes, an interrupt in the middle of a
+write, a read-only file, a marker quoted inside a code fence.
 
-pytest ne collecte pas ce répertoire (`norecursedirs = adversarial`).
+pytest does not collect this directory (`norecursedirs = adversarial`).
 
 ## Usage
 
-Multiplateforme, Windows et POSIX.
+Cross-platform, Windows and POSIX.
 
-Worktree détaché (mesure d'un SHA) :
+Detached worktree (measure a SHA):
 
 ```powershell
 python 00-setup.py <SHA>
@@ -22,54 +28,74 @@ python3 00-setup.py <SHA>
 AEF_BUILD=/tmp/audit-<SHA> python3 lance-tout.py
 ```
 
-Arbre courant (CI : le checkout **est** l'arbre) :
+Current tree (CI: the checkout **is** the tree):
 
 ```bash
 python3 00-setup.py --current
 AEF_BUILD="$(git rev-parse --show-toplevel)" python3 lance-tout.py
 ```
 
-`00-setup.py` crée le venv (`.venv\Scripts` ou `.venv/bin` selon l'OS), installe le paquet en éditable, et **s'arrête net si l'arbre importé n'est pas celui du répertoire mesuré**. Chaque script rejoue ce contrôle au démarrage, via `bancenv.verifier_arbre_importe()`.
+`00-setup.py` creates the venv (`.venv\Scripts` or `.venv/bin` depending on the
+OS), installs the package editable, and **stops immediately if the imported
+tree is not the tree being measured**. Every script replays that check at
+startup, via `bancenv.verifier_arbre_importe()`.
 
-Les scripts qui exigent POSIX — `mkfifo`, liens symboliques, `SIGKILL`, `strace` — s'annoncent **« IGNORE sur Windows »** (code 77) plutôt que de rendre un succès qui n'en est pas un. Sous Windows, `05`, `07` et `10` restent donc à la charge d'un runner Linux.
+Scripts that require POSIX — `mkfifo`, symbolic links, `SIGKILL`, `strace` —
+announce **« IGNORE on Windows »** (exit 77) rather than return a success that
+is not one. On Windows, `05`, `07` and `10` therefore remain a Linux runner's
+job.
 
-Chaque script se lance aussi seul, avec le python du venv mesuré.
+Each script also runs on its own, with the Python of the measured venv.
 
-Sur GitHub Actions, le workflow `adversarial.yml` tourne sur Linux, la nuit, à la demande, ou lorsqu'une PR porte le label `adversarial`. Il n'est pas branché sur chaque push.
+On GitHub Actions, the `adversarial.yml` workflow runs on Linux, nightly, on
+demand, or when a pull request carries the `adversarial` label. It is not
+wired to every push.
 
-## Ce que chaque script prouve
+## What each script proves
 
-| Script | Propriété vérifiée |
+| Script | Property |
 |---|---|
-| `01-concurrence-ingest.py` | aucune écriture perdue n'est rapportée comme un succès (8, 16 et 32 processus) |
-| `02-concurrence-declare.py` | la même propriété sur le chemin transactionnel |
-| `03-concurrence-record.py` | en contention, blocage explicite plutôt que file silencieuse |
-| `04-plafond-evidences.py` | au plafond d'évidences, blocage explicite plutôt qu'un `NO_CHANGE` trompeur |
-| `05-dryrun-vs-apply.py` *(POSIX)* | `--dry-run` rend le même verdict que l'apply, pour sept états du journal |
-| `06-taux-erreur-fs.py` | une commande légitime concurrente ne rend pas d'erreur de système de fichiers |
-| `07-crash-sigkill.py` *(POSIX)* | une interruption ordinaire ne rend jamais le workspace irrécupérable |
-| `08-audit-scopage.py` | l'audit est scopé : workspace hérité et promotion légitime restent `PASS` |
-| `09-collision-identifiants.py` | gardes mutuelles croisées ; collision d'identifiant casse × normalisation |
-| `10-epic3-runtime.py` *(POSIX)* | aucun binaire du dépôt exécuté, aucun accès réseau, aucune amplification zip |
-| `11-hygiene-git.py` | le verrou d'exécution ne se retrouve ni dans `git status` ni dans l'historique |
-| `12-fence-marqueurs.py` | un marqueur situé dans une fence markdown n'est pas un marqueur |
-| `13-guidance-integrite.py` | agrégat bloqué et atomique, mode de fichier préservé, pas d'écrasement en course |
-| `decompte.py <avant> <après>` | décomposition exacte du delta de tests entre deux worktrees |
+| `01-concurrence-ingest.py` | no lost write is reported as success (8, 16 and 32 processes) |
+| `02-concurrence-declare.py` | the same property on the transactional path |
+| `03-concurrence-record.py` | under contention, an explicit block rather than a silent queue |
+| `04-plafond-evidences.py` | at the evidence cap, an explicit block rather than a misleading `NO_CHANGE` |
+| `05-dryrun-vs-apply.py` *(POSIX)* | `--dry-run` yields the same verdict as apply, for seven journal states |
+| `06-taux-erreur-fs.py` | a legitimate concurrent command does not return a filesystem error |
+| `07-crash-sigkill.py` *(POSIX)* | an ordinary interrupt never leaves the workspace unrecoverable |
+| `08-audit-scopage.py` | audit is scoped: an inherited workspace and a legitimate promotion stay `PASS` |
+| `09-collision-identifiants.py` | crossed mutual guards; identifier collision is case × normalization |
+| `10-epic3-runtime.py` *(POSIX)* | no repository binary executed, no network access, no zip amplification |
+| `11-hygiene-git.py` | the runtime lock appears neither in `git status` nor in history |
+| `12-fence-marqueurs.py` | a marker inside a Markdown fence is not a marker |
+| `13-guidance-integrite.py` | blocked aggregate is atomic, file mode is preserved, no mid-flight overwrite |
+| `decompte.py <before> <after>` | exact decomposition of the pytest delta between two worktrees |
 
-## Trois règles de méthode
+## Three method rules
 
-Elles ne sont pas décoratives : chacune vient d'un cas où une mesure semblait concluante et ne l'était pas.
+They are not decorative: each comes from a case where a measurement looked
+conclusive and was not.
 
-**Un contrôle positif avant toute conclusion.** Un scénario qui ne discrimine pas ne prouve rien. « Zéro attaque réussie » peut vouloir dire « le chemin attaqué n'a jamais été atteint ». Chaque script inclut donc un cas qui **doit** réussir, et un cas qui **doit** échouer.
+**A positive control before any conclusion.** A scenario that does not
+discriminate proves nothing. "Zero successful attacks" can mean "the attacked
+path was never reached". Each script therefore includes a case that **must**
+succeed, and a case that **must** fail.
 
-**Provoquer l'état plutôt que de le simuler.** Un test qui fabrique un journal de transaction à la main ne voit pas le défaut de reprise ; un test qui remplace une taille déclarée par un mock ne voit pas l'amplification zip. Les deux peuvent rester verts pendant que le défaut est ouvert.
+**Provoke the state rather than simulate it.** A test that hand-builds a
+transaction journal does not see the recovery defect; a test that mocks a
+declared size does not see zip amplification. Both can stay green while the
+defect is open.
 
-**Comparer à la version précédente avant d'attribuer un défaut.** Un comportement surprenant n'est pas forcément une régression : il faut vérifier qu'il n'existait pas déjà.
+**Compare with the previous version before attributing a defect.** A surprising
+behaviour is not necessarily a regression: check that it did not already exist.
 
-## Codes de sortie
+## Exit codes
 
-Un script sort en `0` si et seulement si toutes les propriétés qu'il vérifie sont tenues.
+A script exits `0` if and only if every property it checks holds.
 
-Un script sort en `77` lorsqu'il **IGNORE** la mesure faute de support de la plateforme. `lance-tout.py` compte cet état comme ignoré, jamais comme un succès.
+A script exits `77` when it **IGNORE**s the measurement because the platform
+cannot support it. `lance-tout.py` counts that state as ignored, never as a
+success.
 
-Tout autre code non nul signifie qu'au moins une propriété n'est pas tenue. `lance-tout.py` agrège, **nomme** les scripts en échec, et sort lui-même non nul.
+Any other non-zero code means at least one property does not hold.
+`lance-tout.py` aggregates, **names** the failing scripts, and itself exits
+non-zero.
