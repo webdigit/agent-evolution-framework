@@ -7,19 +7,25 @@ verifier_arbre_importe()
 """A non-AEF thread rewrites a governed file during a real mutating CLI call.
 
 Positive control: the same command without that thread reports CHANGE and
-persists. Failure: CHANGE while a concurrent write is overwritten, or an
-active writer never surfaces workspace_contention (the apply-time guard is
-dead).
+persists. Failure: an active writer never surfaces workspace_contention.
+
+The writer targets `.agent/integrations/registry.json`. ingest and record do
+not persist that file, so a CHANGE cannot overwrite the token — attacking
+knowledge.json or records/ instead turns the healthy run red
+(invalid_knowledge_state / record_conflict). The writer is stopped and the
+file is snapshotted under the same lock the instant the CLI returns, so that
+read is not a post-CLI rewrite. The sabotage discriminator remains
+BLOCKED == 0 while the writer ran.
 """
-import json, subprocess, sys, tempfile, shutil, threading, uuid
+import json, subprocess, sys, tempfile, shutil, threading, time, uuid
 from pathlib import Path
 sys.path.insert(0, str(ROOT / "src"))
 from aef.record_document import build_persisted_record
 
 AEF = AEF
 REGISTRY = Path(".agent") / "integrations" / "registry.json"
-ROUNDS = 40
 TOKEN_KEY = "external_writer"
+ROUNDS = 40
 
 
 def cli(ws, *args, timeout=120):
@@ -77,11 +83,14 @@ def setup(prefix, *, record=True):
     return ws, build_persisted_record(doc)
 
 
-def sneak_loop(path, payload, stop, writes):
+def sneak_loop(path, payload, stop, writes, lock):
     while not stop.is_set():
         try:
-            path.write_text(payload, encoding="utf-8")
-            writes.append(1)
+            with lock:
+                if stop.is_set():
+                    break
+                path.write_text(payload, encoding="utf-8")
+                writes.append(1)
         except OSError:
             pass
 
@@ -92,16 +101,23 @@ def with_writer(ws, argv):
     target = ws / REGISTRY
     stop = threading.Event()
     writes = []
+    lock = threading.Lock()
+    after = ""
     thread = threading.Thread(
-        target=sneak_loop, args=(target, payload, stop, writes), daemon=True,
+        target=sneak_loop, args=(target, payload, stop, writes, lock), daemon=True,
     )
     thread.start()
+    deadline = time.monotonic() + 2
+    while not writes and time.monotonic() < deadline:
+        time.sleep(0)
     try:
         code, status, reason, envelope = cli(ws, *argv)
+        with lock:
+            stop.set()
+            after = target.read_text(encoding="utf-8") if target.is_file() else ""
     finally:
         stop.set()
         thread.join(timeout=2)
-    after = target.read_text(encoding="utf-8") if target.is_file() else ""
     return code, status, reason, writes, after, token
 
 
