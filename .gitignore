@@ -20,6 +20,9 @@ htmlcov/
 # Packaging and build artifacts
 build/
 dist/
+# Root-only variants (dist-lot6, dist-prep-2.0.0, ...). Anchored on
+# purpose: dist*/ would also ignore distribution/ and distinct/.
+/dist-*/
 *.egg-info/
 *.egg
 wheels/
