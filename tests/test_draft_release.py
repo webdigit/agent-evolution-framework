@@ -25,6 +25,7 @@ from scripts.prepare_draft_release import (
     parse_sha256sums,
     plan_draft_release,
     redact_secrets,
+    render_published_release_body,
     render_release_body,
     render_sha256sums,
     version_from_wheel,
@@ -599,6 +600,63 @@ def test_release_attribution_is_canonical_and_commit_bound():
     assert payload["schema"] == "aef.release.attribution/v1"
 
 
+def _canonical_checksums() -> str:
+    return (
+        f"{'a' * 64}  agent_evolution_framework-1.2.0-py3-none-any.whl\n"
+        f"{'b' * 64}  agent_evolution_framework-1.2.0.tar.gz\n"
+    )
+
+
+def test_draft_release_body_keeps_the_internal_publish_instruction():
+    draft = render_release_body(tag="v1.2.0", commit=COMMIT_A, version="1.2.0")
+    assert "human_action_required" in draft
+    assert "Draft" in draft
+    assert parse_attribution_body(draft)["commit"] == COMMIT_A
+
+
+def test_published_release_body_drops_the_internal_draft_instruction():
+    published = render_published_release_body(
+        tag="v1.2.0",
+        commit=COMMIT_A,
+        version="1.2.0",
+        checksums=_canonical_checksums(),
+    )
+    assert "human_action_required" not in published
+    assert "Draft" not in published
+    payload = parse_attribution_body(published)
+    assert payload == parse_attribution_body(
+        render_release_body(tag="v1.2.0", commit=COMMIT_A, version="1.2.0")
+    )
+    assert "agent_evolution_framework-1.2.0-py3-none-any.whl" in published
+    assert "b" * 64 in published
+
+
+def test_print_notes_emits_each_body_without_publishing(tmp_path, capsys):
+    from scripts.prepare_draft_release import main
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "agent_evolution_framework-1.2.0-py3-none-any.whl").write_bytes(b"w")
+    (dist / "agent_evolution_framework-1.2.0.tar.gz").write_bytes(b"s")
+    common = [
+        "--tag",
+        "v1.2.0",
+        "--commit",
+        COMMIT_A,
+        "--package-version",
+        "1.2.0",
+    ]
+    assert main([*common, "--print-notes", "draft"]) == 0
+    draft = capsys.readouterr().out
+    assert "human_action_required" in draft
+    assert "Draft" in draft
+    assert main([*common, "--print-notes", "published", "--dist", str(dist)]) == 0
+    published = capsys.readouterr().out
+    assert "human_action_required" not in published
+    assert "Draft" not in published
+    assert parse_attribution_body(published) == parse_attribution_body(draft)
+
+
 def test_partial_draft_then_moved_tag_fails_closed():
     client = MemoryGitHub()
     desired = _desired()
@@ -672,5 +730,6 @@ def test_release_documentation_covers_gates_and_recovery():
         "setuptools",
         "tag lookup omits drafts",
         "release ID",
+        "--print-notes published",
     ):
         assert fragment in DOCS

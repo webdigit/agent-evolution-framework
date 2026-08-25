@@ -108,11 +108,28 @@ def render_attribution_line(payload: dict[str, str]) -> str:
 
 
 def render_release_body(*, tag: str, commit: str, version: str) -> str:
+    """Notes written on the GitHub *draft*. Internal operator instruction."""
     payload = attribution_payload(tag=tag, commit=commit, version=version)
     return (
         "Draft Release prepared by GitHub Actions.\n\n"
         "Verify the attached assets and SHA-256 checksums before publishing.\n"
         "human_action_required: publish_release\n"
+        f"\n{ATTRIBUTION_MARKER}\n{render_attribution_line(payload)}\n"
+    )
+
+
+def render_published_release_body(
+    *, tag: str, commit: str, version: str, checksums: str
+) -> str:
+    """Notes for a published Release. Never applied by the workflow."""
+    parse_sha256sums(checksums)
+    payload = attribution_payload(tag=tag, commit=commit, version=version)
+    return (
+        f"{expected_release_name(version)}\n\n"
+        "Wheel, sdist, and SHA256SUMS.txt are attached.\n"
+        "Recompute the SHA-256 hashes below against the downloaded files "
+        "before installing.\n\n"
+        f"{checksums}"
         f"\n{ATTRIBUTION_MARKER}\n{render_attribution_line(payload)}\n"
     )
 
@@ -570,6 +587,8 @@ def _write_step_summary(summary: dict[str, Any]) -> None:
         f"- validations: {', '.join(summary['validations'])}",
         f"- draft: {summary['draft_release_url']}",
         f"- human_action_required: `{summary['human_action_required']}`",
+        "- published notes are rendered with `--print-notes published`; "
+        "the workflow never applies them",
         "",
         "| Asset | Size | SHA-256 |",
         "| --- | ---: | --- |",
@@ -581,14 +600,31 @@ def _write_step_summary(summary: dict[str, Any]) -> None:
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def published_notes_from_dist(
+    *, tag: str, commit: str, version: str, dist: Path
+) -> str:
+    wheel, sdist = locate_release_artifacts(dist)
+    return render_published_release_body(
+        tag=tag,
+        commit=commit,
+        version=version,
+        checksums=render_sha256sums((wheel, sdist)),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", required=True)
     parser.add_argument("--commit", required=True)
-    parser.add_argument("--main-ref", required=True)
     parser.add_argument("--package-version", required=True)
-    parser.add_argument("--dist", required=True, type=Path)
-    parser.add_argument("--repository", required=True)
+    parser.add_argument(
+        "--print-notes",
+        choices=("draft", "published"),
+        help="write draft or published notes to stdout; does not publish",
+    )
+    parser.add_argument("--main-ref")
+    parser.add_argument("--dist", type=Path)
+    parser.add_argument("--repository")
     parser.add_argument("--api-url", default="https://api.github.com")
     parser.add_argument("--validated", action="append", default=[])
     parser.add_argument("--cwd", default=Path.cwd(), type=Path)
@@ -598,6 +634,30 @@ def main(argv: list[str] | None = None) -> int:
         parse_release_tag(args.tag)
         current_commit = normalize_commit(args.commit)
         assert_package_version_matches_tag(args.package_version, args.tag)
+        if args.print_notes == "draft":
+            sys.stdout.write(
+                render_release_body(
+                    tag=args.tag, commit=current_commit, version=args.package_version
+                )
+            )
+            return 0
+        if args.print_notes == "published":
+            if args.dist is None:
+                raise DraftReleaseError("--dist is required with --print-notes published")
+            sys.stdout.write(
+                published_notes_from_dist(
+                    tag=args.tag,
+                    commit=current_commit,
+                    version=args.package_version,
+                    dist=args.dist,
+                )
+            )
+            return 0
+        if args.main_ref is None or args.dist is None or args.repository is None:
+            raise DraftReleaseError(
+                "--main-ref, --dist, and --repository are required "
+                "unless --print-notes is set"
+            )
         assert_commit_is_on_main(current_commit, args.main_ref, cwd=args.cwd)
         wheel, sdist = locate_release_artifacts(args.dist)
         wheel_version = version_from_wheel(wheel)

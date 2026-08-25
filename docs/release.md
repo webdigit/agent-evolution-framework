@@ -78,9 +78,25 @@ Download the three assets from the draft and recompute their hashes against
 
 ## Publish the draft
 
-After the proofs are accepted, publish the GitHub Release manually. Then
-download the published assets again and confirm the hashes still match. The
-workflow never performs that publication.
+After the proofs are accepted, publish the GitHub Release **manually**. The
+workflow never performs that publication, and it never replaces the draft
+notes with the public notes.
+
+Render the public notes from the same tagged checkout and artifacts, then
+pass them when flipping the draft:
+
+```bash
+python scripts/prepare_draft_release.py --print-notes published \
+  --tag vX.Y.Z --commit <tagged-commit> --package-version X.Y.Z \
+  --dist dist > published-notes.md
+gh release edit vX.Y.Z --draft=false --notes-file published-notes.md
+```
+
+`--print-notes published` writes the public body to stdout. It does not
+create, move, or publish a Release. The published body keeps
+`AEF_RELEASE_ATTRIBUTION` and the checksums, and it omits the internal
+draft instruction. Then download the published assets again and confirm
+the hashes still match.
 
 ## Recovery
 
