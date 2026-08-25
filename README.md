@@ -19,17 +19,18 @@ docket, and the model is a party — not the judge. See
 
 ## Install
 
-AEF V1 requires Python 3.11 or later. Install the tagged source from GitHub
-when Git is available:
+AEF requires Python 3.11 or later. The Python package version (2.0.0) is
+independent of the V1 workspace contract (`schema_version` `1.0.0`). Install
+the tagged source from GitHub when Git is available:
 
 ```console
-python -m pip install "agent-evolution-framework @ git+https://github.com/webdigit/agent-evolution-framework.git@v1.1.0"
+python -m pip install "agent-evolution-framework @ git+https://github.com/webdigit/agent-evolution-framework.git@v2.0.0"
 ```
 
 Alternatively, install the release wheel directly. This method does not require Git:
 
 ```console
-python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/agent_evolution_framework-1.1.0-py3-none-any.whl"
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v2.0.0/agent_evolution_framework-2.0.0-py3-none-any.whl"
 ```
 
 Pip may still need network access to install dependencies, so the wheel alone
@@ -134,11 +135,20 @@ The complete syntax, output modes, and exit codes are documented in
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
-## V1 boundaries
+## Workspace-contract (V1) boundaries
+
+"V1" names the workspace contract (`framework_version` / `schema_version`
+`1.0.0`, profile `aef-v1`), not the Python package version. Package 2.0.0
+still implements that contract. A `.agent/` created by 1.2.0 needs no
+migration.
 
 - State and activation are project-local by default.
-- INIT, AUDIT, RECORD, DISCOVER, CONSOLIDATE, EVALUATE, and Claude project
-  integration are available; UPGRADE is not part of V1.
+- INIT, AUDIT, RECORD, INGEST, competency declare, DISCOVER, CONSOLIDATE,
+  EVALUATE, UPGRADE, DOCTOR, and project-scoped guidance integration are
+  available.
+- UPGRADE migrates workspace files toward the contract of the already
+  installed package; it is not a software update. On a valid V1 workspace
+  already at `schema_version` `1.0.0`, it returns `NO_CHANGE`.
 - RECORD persists an explicit declared-fact file under `.agent/records/`. AEF
   computes the digest. Replay of a valid matching file returns `NO_CHANGE`;
   the same `record_id` with different content is blocked. RECORD does not
@@ -150,8 +160,8 @@ The complete syntax, output modes, and exit codes are documented in
   level.
 - Filesystem writes are confined and atomic per file. EVALUATE adds a recovery
   journal for its multi-file transaction.
-- The Claude integration is guidance-only and project-scoped; no V1 hooks are
-  installed.
+- Guidance integration is guidance-only and project-scoped. The V1 workspace
+  contract does not install hooks.
 
 ## License
 

@@ -6,7 +6,7 @@ You can install the tagged Git source when Git is available. The release wheel
 does not require Git:
 
 ```console
-python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/agent_evolution_framework-1.1.0-py3-none-any.whl"
+python -m pip install "https://github.com/webdigit/agent-evolution-framework/releases/download/v2.0.0/agent_evolution_framework-2.0.0-py3-none-any.whl"
 ```
 
 Pip can still need network access for dependencies, so this is not a complete

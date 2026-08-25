@@ -4,6 +4,80 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-24
+
+Package 2.0.0 still implements the V1 workspace contract
+(`framework_version` / `schema_version` `1.0.0`, profile `aef-v1`). A
+`.agent/` created by 1.2.0 needs no migration. `aef upgrade --check` on
+that workspace returns `NO_CHANGE`. The major bump is for documented
+CLI output that changed, not for a new workspace schema.
+
+### Added
+
+- INGEST: `aef ingest --intake FILE` cites persisted records and writes
+  only `.agent/knowledge/knowledge.json`.
+- Competency declaration: `aef competency declare --declaration FILE`
+  births a competency at L1 with an explicit human decision.
+- DOCTOR: `aef doctor` diagnoses the runtime without writing, without
+  running `pip`, and without creating environments.
+- Guidance doors for `agents`, `gemini`, and atomic `integrate all`,
+  with fence-aware marker detection.
+- Adversarial banc under `tests/adversarial/`, with a CI workflow
+  (`adversarial.yml`) on Linux, nightly, on demand, or when a pull
+  request carries the `adversarial` label.
+- Property registry in `docs/properties.md`.
+- Guard against tracked gitignored paths:
+  `scripts/check_tracked_gitignored.py`.
+- Guard against non-runtime trees in the wheel (`tests/`, `scripts/`,
+  `fixtures/`, `docs/`, `.github/`, `src/`): `WHEEL_FORBIDDEN_TREES` in
+  `scripts/verify_artifacts.py`.
+
+### Changed / Compatibility
+
+Observable output differences since 1.2.0:
+
+- Ingest at the evidence cap: 1.2.0 returned `NO_CHANGE` (exit 0).
+  2.0.0 returns `BLOCKED` (exit 4) with `meta.reason`
+  `evidence_cap_exceeded`.
+- Concurrent mutation: 2.0.0 returns `BLOCKED` with `meta.reason`
+  `workspace_contention`. 1.2.0 returned a filesystem error or a false
+  success.
+- Record while an EVALUATE journal is open: `BLOCKED` (exit 4) with
+  `meta.reason` `evaluation_recovery_required`.
+- The filesystem error code emitted for the current guidance doors is
+  `guidance_filesystem_error`. 1.2.0 emitted
+  `claude_integration_filesystem_error` for the Claude integration
+  path. The previous code remains only for the brownfield
+  `.claude/CLAUDE.md` adapter.
+- `doctor.install_command` is workspace-relative (no absolute host
+  path). The host interpreter is named by label (`CPython-3.13`), not
+  by filesystem path. `doctor` itself is new in 2.0.0; this is the
+  frozen output shape.
+- A marker inside a Markdown fence is not a marker: `--status` reports
+  a different `installed` value for the same file than 1.2.0.
+- Duplicate JSON keys in a governed input (including RECORD, which
+  existed in 1.2.0) are rejected with `duplicate_json_key` (exit 3).
+  1.2.0 kept the last value.
+- Human BLOCKED text for an unsafe guidance write is now
+  `[BLOCKED] Guidance integration cannot be updated safely`.
+
+### Documentation
+
+- "V1" names the workspace contract, not the Python package version.
+  User-facing docs and CLI help state that explicitly.
+
+### Boundaries
+
+- Two version axes. The package is 2.0.0. The workspace contract stays
+  `1.0.0`. `claude_integration.py` still refuses a manifest whose
+  `framework_version` or `schema_version` is not `"1.0.0"`.
+- There is no `aef update` command. `upgrade` migrates workspace files
+  only. On a valid V1 workspace already at `schema_version` `1.0.0`,
+  it returns `NO_CHANGE`.
+- `doctor` never executes the proposed install command.
+- The distribution remains source-available under the PolyForm Internal
+  Use License 1.0.0 and is not open source.
+
 ## [1.2.0] - 2026-08-20
 
 ### Added
@@ -117,3 +191,4 @@ Initial public V1 release.
 [1.1.1]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.0...v1.1.1
 [1.1.2]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.1...v1.1.2
 [1.2.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.1.2...v1.2.0
+[2.0.0]: https://github.com/webdigit/agent-evolution-framework/compare/v1.2.0...v2.0.0

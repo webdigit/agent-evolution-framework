@@ -212,17 +212,12 @@ def test_documentation_links_and_command_claims_are_current():
     assert "--refresh` can modify" in commands
     assert "Personal User Name" not in guide
 
-    legacy_wheel_url = (
-        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.1.0/"
-        "agent_evolution_framework-1.1.0-py3-none-any.whl"
-    )
     current_wheel_url = (
-        "https://github.com/webdigit/agent-evolution-framework/releases/download/v1.2.0/"
-        "agent_evolution_framework-1.2.0-py3-none-any.whl"
+        "https://github.com/webdigit/agent-evolution-framework/releases/download/v2.0.0/"
+        "agent_evolution_framework-2.0.0-py3-none-any.whl"
     )
-    assert current_wheel_url in installation
-    for document in (readme, getting_started):
-        assert legacy_wheel_url in document
+    for document in (readme, installation, getting_started):
+        assert current_wheel_url in document
     for document in (readme, installation, getting_started):
         assert "does not require Git" in document
         assert "air-gap" in document

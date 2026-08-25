@@ -37,6 +37,12 @@ def _write_declared_aef(env: Path, version: str) -> Path:
     return pkg
 
 
+def _pin_running_module_version(monkeypatch, version: str = "1.2.0") -> None:
+    # runtime_discovery imported __version__ by value; patch both bindings.
+    monkeypatch.setattr("aef._version.__version__", version)
+    monkeypatch.setattr("aef.runtime_discovery.__version__", version)
+
+
 def _write_real_install_markers(env: Path, pkg: Path, *, version: str = "1.2.0") -> None:
     site_packages = pkg.parent
     dist = site_packages / f"agent_evolution_framework-{version}.dist-info"
@@ -342,7 +348,7 @@ def test_stale_only_declared_env_falls_back_to_python_module(tmp_path, monkeypat
     )
     stale = write_venv(tmp_path / ".aef-venv", kind="posix" if os.name != "nt" else "windows")
     _write_declared_aef(stale, "1.0.0")
-    monkeypatch.setattr("aef._version.__version__", "1.2.0")
+    _pin_running_module_version(monkeypatch)
     result = diagnose_runtime(tmp_path)
     assert result["discovery_method"] == "python_module"
     assert result["found_package_version"] == "1.2.0"
@@ -405,7 +411,7 @@ def _lying_declared_env(workspace: Path) -> Path:
 
 def test_lying_declared_env_reports_tree_version_with_reserve(tmp_path, capsys, monkeypatch):
     _lying_declared_env(tmp_path)
-    monkeypatch.setattr("aef._version.__version__", "1.2.0")
+    _pin_running_module_version(monkeypatch)
     result = diagnose_runtime(tmp_path)
     assert result["discovery_method"] == "declared_env"
     assert result["found_package_version"] == "9.9.9"
@@ -427,13 +433,13 @@ def test_declared_env_shows_honest_trust_disclaimer(tmp_path, capsys, monkeypatc
     env = write_venv(tmp_path / ".aef-venv", kind="windows" if os.name == "nt" else "posix")
     pkg = _write_declared_aef(env, "1.2.0")
     _write_real_install_markers(env, pkg)
-    monkeypatch.setattr("aef._version.__version__", "1.2.0")
+    _pin_running_module_version(monkeypatch)
     _, _, real_out = invoke(capsys, "--human", "--workspace", str(tmp_path), "doctor")
 
     other = tmp_path / "other"
     other.mkdir()
     _lying_declared_env(other)
-    monkeypatch.setattr("aef._version.__version__", "1.2.0")
+    _pin_running_module_version(monkeypatch)
     _, _, fake_out = invoke(capsys, "--human", "--workspace", str(other), "doctor")
 
     assert "Trust     : tree read only (pip install not verified)" in real_out.out
