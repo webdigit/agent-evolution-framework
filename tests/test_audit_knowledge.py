@@ -9,6 +9,7 @@ import pytest
 
 from conftest import installed_aef_script
 
+from aef import cli as aef_cli
 from aef.filesystem import apply_workspace, load_workspace
 from aef.init_profiles import get_init_profile
 from aef.operations import audit_project, init_project
@@ -17,6 +18,10 @@ from aef.schema_validation import draft202012_validator, validate_persisted_know
 
 KNOWLEDGE_PATH = ".agent/knowledge/knowledge.json"
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _human_workspace_line(workspace: Path) -> str:
+    return f"Workspace : {aef_cli._escape_human_value(str(workspace.resolve()))}\n"
 
 
 def _initialized_project():
@@ -161,8 +166,12 @@ def test_audit_invalid_knowledge_subprocess_modes_are_read_only(tmp_path, launch
     assert "Traceback" not in completed.stdout + completed.stderr
     assert "unicode_extension" not in completed.stdout + completed.stderr
     if mode == "human":
+        workspace_line = completed.stdout.splitlines()[-1]
+        assert workspace_line.startswith("Workspace : ")
         assert completed.stdout == (
             "[FAILED] AEF audit found problems\n\n- invalid knowledge state\n"
+            + workspace_line
+            + "\n"
         )
     else:
         envelope = json.loads(completed.stdout)
@@ -207,6 +216,7 @@ def test_audit_missing_knowledge_subprocess_is_read_only(tmp_path, launcher, mod
     if mode == "human":
         assert completed.stdout == (
             "[FAILED] AEF audit found problems\n\n- missing knowledge state\n"
+            + _human_workspace_line(workspace)
         )
     else:
         envelope = json.loads(completed.stdout)

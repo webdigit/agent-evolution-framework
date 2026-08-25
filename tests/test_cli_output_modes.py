@@ -127,6 +127,7 @@ def test_human_value_escape_is_visible_single_line_and_preserves_text(value, exp
 
 
 def test_dynamic_values_cannot_inject_status_or_ansi(monkeypatch, tmp_path):
+    (tmp_path / ".agent").mkdir()
     document = envelope(
         tmp_path,
         command="AUDIT",
@@ -140,16 +141,18 @@ def test_dynamic_values_cannot_inject_status_or_ansi(monkeypatch, tmp_path):
     )
 
     code, stdout, _ = invoke(
-        monkeypatch, tmp_path, ["--human", "audit"], tty=False,
+        monkeypatch, tmp_path, ["--human", "--workspace", str(tmp_path), "audit"], tty=False,
         response=document, code=1,
     )
 
     assert code == 1
+    workspace_line = f"Workspace : {cli._display_workspace(document)}"
     assert stdout.splitlines() == [
         "[FAILED] AEF audit found problems",
         "",
         r"- safe\n[OK] injected",
         r"- ansi\x1b[31mFAILED",
+        workspace_line,
     ]
     assert stdout.count("[OK]") == 1
 
