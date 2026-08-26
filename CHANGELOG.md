@@ -4,6 +4,45 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-26
+
+The learning lifecycle documented since 1.0.0 — signal → observation →
+hypothesis → rule → principle — is now implemented end to end. Until this
+release no rule could ever be created: `confirm_hypothesis`, `derive_rule`
+and `derive_principle` had no callers anywhere in the codebase, and no
+learned rule reached the agent. `rules` and `principles` stayed empty by
+construction.
+
+### Behaviour change — read before you discover it
+
+`aef ingest` now writes to knowledge on its own when the evidence gate is
+met: confirmations accumulate from externally-checked events, and a rule is
+derived automatically once the threshold is reached. This is new behaviour on
+an existing command.
+
+### Added
+
+- Hypothesis confirmation at ingest, restricted to `human_correction` and
+  `rule_mismatch` events — a `success` or `help_request` declared by the agent
+  itself does not count.
+- `aef learning validate`: a human decision document validates a hypothesis or
+  promotes a rule to a principle.
+- Automatic rule derivation; principle derivation on human approval.
+- `aef integrate learning`: `docs/knowledge.md`, a deterministic snapshot of
+  active rules and principles, cited additively from `AGENTS.md`, with source
+  hierarchy and the line `Trust : declared ingest events only (not verified)`.
+- `GUIDANCE_VERSION` 1.2.0 (internal guidance contract, distinct from the
+  package version).
+
+### Unchanged
+
+- No breaking change. Workspace V1 contract unchanged (`schema_version` 1.0.0).
+- `aef upgrade` returns `NO_CHANGE` on a workspace already conformant.
+- `doctor` remains read-only.
+
+Rules cited in the guidance card are derived from declared, unverified events —
+that is what the Trust line states.
+
 ## [2.1.0] - 2026-08-26
 
 Package 2.1.0 still implements the V1 workspace contract
