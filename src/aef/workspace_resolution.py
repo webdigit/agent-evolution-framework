@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 AGENT_DIR_NAME = ".agent"
+DEPOSIT_DIR_NAME = ".aef-deposit"
 
 # cli.py handlers that consume pre-resolved workspace from args.workspace.
 CLI_WORKSPACE_CONSUMER_FUNCTIONS = frozenset(
@@ -105,6 +106,11 @@ def resolve_cli_workspace(workspace_arg: str | None) -> WorkspaceResolution:
         no_agent_in_start_or_ancestors=no_agent,
         explicit_agent_workspace=explicit_agent_workspace,
     )
+
+
+def resolve_deposit_dir(resolution: WorkspaceResolution) -> Path:
+    """Return ``<workspace>/.aef-deposit/`` for a resolved workspace root."""
+    return resolution.workspace / DEPOSIT_DIR_NAME
 
 
 def apply_workspace_resolution_to_args(args: argparse.Namespace) -> None:

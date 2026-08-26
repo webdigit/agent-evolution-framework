@@ -17,6 +17,7 @@ from aef.operations import validate_discovery_snapshot
 from aef.promotion_recommendations import validate_evaluation_state
 from aef.ingest_intake import validate_ingest_submission
 from aef.competency_declaration import validate_competency_declaration
+from aef.deposit_intake import validate_deposit_submission
 from aef.record_document import build_persisted_record, validate_record_submission
 from aef.schema_validation import draft202012_validator, load_packaged_schema
 from aef.strict_json import validate_strict_json
@@ -384,6 +385,12 @@ def test_ingest_example_document_validates_against_intake_contract():
     intake = validate_ingest_submission(_document("ingest.json"))
     assert intake["protocol"] == "aef.ingest.submit/v1"
     assert intake["records"]
+
+def test_deposit_envelope_example_validates_against_capture_contract():
+    envelope = validate_deposit_submission(_document("deposit-envelope.json"))
+    assert envelope["protocol"] == "aef.deposit.submit/v1"
+    assert envelope["events"]
+
 
 def test_competency_declaration_example_validates_against_declare_contract():
     declaration = validate_competency_declaration(_document("competency-declaration.json"))

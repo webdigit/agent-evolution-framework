@@ -183,6 +183,39 @@ INGEST derives learning signals, observations, and candidate hypotheses only.
 It does not create XP, rules, or competencies, and it is not a runtime `doctor`
 install.
 
+## DEPOSIT capture envelope
+
+Use [deposit-envelope.json](examples/deposit-envelope.json) when a remote agent
+must leave a signal without shell access to `aef record` and `aef ingest`.
+Capture writes under `<workspace>/.aef-deposit/` at the **resolved workspace
+root** (the directory that owns `.agent/` after workspace walk-up). It is not
+engine state and grants no authority.
+
+The closed root uses protocol `aef.deposit.submit/v1`. One envelope carries one
+declared record plus its learning `events` in the same document. Record fields
+match `aef.record.submit/v1` (`record_id`, `recorded_at`, `declared_by`,
+`payload`, optional `external_metrics`). Each event follows the same rules as
+INGEST: an `id`, and either `novel: true` or a `kind` among
+`help_request`, `human_correction`, `rule_mismatch`, or `success`.
+`rule_mismatch` requires `rule_id`. `success` requires `explained`.
+
+Do **not** include a `digest`. AEF computes digests only during admission.
+Submitted identifiers follow **Submitted identifiers** above (no `:`).
+
+Writing an envelope under `.aef-deposit/` does not modify `.agent/records/`,
+`.agent/knowledge/knowledge.json`, `.agent/state/career.json`, or
+`.agent/state/competencies.json`. Admission from the deposit box is a separate
+transition (`aef ingest --from-deposit`, not yet available in this release).
+
+Validate before writing:
+
+```console
+python -c "import json; from aef.deposit_intake import validate_deposit_submission; validate_deposit_submission(json.load(open('docs/examples/deposit-envelope.json', encoding='utf-8')))"
+```
+
+Then copy the JSON to `<workspace>/.aef-deposit/<name>.json` as a regular file
+directly under that directory (no nested subdirectories for the MVP).
+
 ## COMPETENCY declaration
 
 Use [competency-declaration.json](examples/competency-declaration.json) after
