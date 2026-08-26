@@ -248,6 +248,30 @@ aef learning validate --validation docs/examples/learning-principle-validation.j
 aef learning validate --validation docs/examples/learning-principle-validation.json
 ```
 
+## LEARNED knowledge card
+
+After active rules or principles exist in `.agent/knowledge/knowledge.json`
+(see INGEST and LEARNING validation above), render the agent-readable card:
+
+```console
+aef integrate learning --dry-run
+aef integrate learning
+aef integrate learning --status
+```
+
+The command writes or refreshes `docs/knowledge.md` between managed
+`AEF:LEARNING` markers. It lists **active** operational rules and principles
+only, with provenance (`rule` vs `principle`, confirmations,
+`explicit_human_validation`) and an honesty line stating that entries come
+from **declared** ingest events, not verified facts. A workspace with no
+active rules still receives a card that states there are none — never an empty
+file and never a refusal.
+
+Divergence from persisted knowledge is **périmé** (stale), never catalog
+tampering. Regenerate with `aef integrate learning`. `AGENTS.md` cites
+`docs/knowledge.md` additively when you run `aef integrate agents` or
+`aef integrate all`.
+
 ## Refresh and recovery
 
 `aef evaluate --list` is strictly read-only. Refresh may change recommendation

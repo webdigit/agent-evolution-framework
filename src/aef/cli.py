@@ -74,6 +74,7 @@ from .guidance_integration import (
     AGENTS_PATH,
     plan_claude_door,
     plan_door_integration,
+    plan_learning_integration,
     plan_runtime_integration,
 )
 from .operations import (
@@ -87,6 +88,12 @@ from .operations import (
 from .record_document import InvalidRecordSubmissionError, build_persisted_record
 from .record_store import InvalidRecordStoreError, persist_record
 from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
+from .learning_card import (
+    LearningCardBlockedError,
+    knowledge_snapshot_from_project,
+    render_learning_card,
+    wrap_learning_segment,
+)
 from .learning_validation import InvalidLearningValidationError, LearningValidationBlockedError
 from .learning_validation_ops import plan_validate
 from .competency_declaration import (
@@ -635,7 +642,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     return (
                         f"[OK] Guidance integration ({integration}) is installed\n\n"
                         f"Freshness : périmé (stale) — {stale_list}; "
-                        "regenerate with `aef integrate runtime`\n"
+                        "regenerate with the matching `aef integrate <door>` command\n"
                         f"Doctrine : loaded\nAudit    : {audit}\n"
                         f"Reviews  : {reviews} pending\nWarnings : {warning_text}\n"
                     )
@@ -1076,12 +1083,23 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _door_parser(
-        "all",
-        "manage AGENTS.md, doorbells, and the runtime map",
+        "learning",
+        "manage the docs/knowledge.md learned-rules card",
         (
-            "Apply, inspect, or remove the shared commun, root doorbells, and "
-            "runtime map together. No door is written if any requested door is "
-            "blocked. Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
+            "Install, inspect, or remove the managed learned-knowledge card "
+            "(pure render of active rules and principles from knowledge.json). "
+            "Divergence is périmé/stale, never catalog tampering. Does not "
+            "write knowledge."
+        ),
+    )
+    _door_parser(
+        "all",
+        "manage AGENTS.md, doorbells, runtime, and learning cards",
+        (
+            "Apply, inspect, or remove the shared commun, root doorbells, "
+            "runtime map, and learned-knowledge card together. No door is "
+            "written if any requested door is blocked. Does not create or "
+            "rewrite a legacy .claude/CLAUDE.md bridge."
         ),
     )
     upgrade_parser = commands.add_parser(
@@ -1868,7 +1886,9 @@ def _claude_settings_warnings(workspace: Path) -> list[str]:
 
 
 def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    if args.integration not in {"agents", "claude", "gemini", "runtime", "all"}:
+    if args.integration not in {
+        "agents", "claude", "gemini", "runtime", "learning", "all",
+    }:
         raise CLIInputError("unsupported_integration", "The integration is unsupported.")
     if args.scope != "project":
         raise CLIInputError(
@@ -1887,11 +1907,12 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             doctrine_error = "missing_aef_doctrine"
 
     requested = (
-        ["agents", "claude", "gemini", "runtime"] if args.integration == "all"
+        ["agents", "claude", "gemini", "runtime", "learning"]
+        if args.integration == "all"
         else [args.integration]
     )
     if args.remove and args.integration == "all":
-        requested = ["runtime", "gemini", "claude", "agents"]
+        requested = ["learning", "runtime", "gemini", "claude", "agents"]
     plan_order = list(requested)
     if (
         not args.status_only
@@ -1905,6 +1926,14 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if "runtime" in plan_order:
         doctor_result = diagnose_runtime(workspace)
         runtime_expected = wrap_runtime_segment(render_runtime_card(doctor_result))
+
+    learning_expected: bytes | None = None
+    if "learning" in plan_order:
+        try:
+            knowledge = knowledge_snapshot_from_project(current)
+        except LearningCardBlockedError as exc:
+            raise CLIInputError(exc.code, str(exc)) from exc
+        learning_expected = wrap_learning_segment(render_learning_card(knowledge))
 
     aggregate_status = "NO_CHANGE"
     aggregate_diff = {"created": [], "modified": [], "removed": []}
@@ -1942,6 +1971,15 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                     remove=args.remove, status_only=args.status_only,
                 )
                 relative = meta.get("bridge_path") or door_path("runtime")
+            elif door == "learning":
+                assert learning_expected is not None
+                existing = read_guidance_file(workspace, door_path("learning"))
+                status, _, meta = plan_learning_integration(
+                    current, existing,
+                    expected_bytes=learning_expected,
+                    remove=args.remove, status_only=args.status_only,
+                )
+                relative = meta.get("bridge_path") or door_path("learning")
             else:
                 existing = read_guidance_file(workspace, door_path(door))
                 status, _, meta = plan_door_integration(

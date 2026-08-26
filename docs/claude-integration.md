@@ -47,6 +47,15 @@ Managed segment between `AEF:RUNTIME` markers. Host-dependent: idempotence is
 determinism of the doctor render, not a fixed catalog. Divergence → stale /
 périmé (regenerate), not modified / tampered.
 
+### Learned knowledge card — `docs/knowledge.md`
+
+Managed segment between `AEF:LEARNING` markers. Knowledge-dependent: idempotence
+is determinism of the learning render from persisted `knowledge.json`, not a
+fixed catalog. Divergence → stale / périmé (regenerate), not modified /
+tampered. The card states provenance for each entry and includes an honesty
+line that rules are derived from declared events, not verified facts. An empty
+workspace renders a card that says there are no active rules yet.
+
 ### Doorbells
 
 - Root `CLAUDE.md` — managed segment contains `@AGENTS.md` only.

@@ -100,16 +100,20 @@ aef integrate agents [--status|--remove] [--dry-run] [--scope project]
 aef integrate claude [--status|--remove] [--dry-run] [--scope project]
 aef integrate gemini [--status|--remove] [--dry-run] [--scope project]
 aef integrate runtime [--status|--remove] [--dry-run] [--scope project]
+aef integrate learning [--status|--remove] [--dry-run] [--scope project]
 aef integrate all [--status|--remove] [--dry-run] [--scope project]
 aef --json integrate claude --status
 ```
 
 Install project-local guidance doors. `AGENTS.md` holds the only managed copy
-of readable rules (citations to `.agent/core/` and `docs/runtime.md`).
-`CLAUDE.md` and `GEMINI.md` are doorbells without doctrine rules.
-`integrate runtime` produces `docs/runtime.md` as a pure snapshot of
-`aef doctor` (divergence is périmé/stale, never catalog tampering); `doctor`
-remains read-only.
+of readable rules (citations to `.agent/core/`, `docs/runtime.md`, and
+`docs/knowledge.md`). `CLAUDE.md` and `GEMINI.md` are doorbells without
+doctrine rules. `integrate runtime` produces `docs/runtime.md` as a pure
+snapshot of `aef doctor` (divergence is périmé/stale, never catalog
+tampering); `doctor` remains read-only. `integrate learning` produces
+`docs/knowledge.md` as a pure snapshot of active rules and principles from
+persisted knowledge (divergence is périmé/stale, never catalog tampering);
+it does not write `.agent/knowledge/`.
 `integrate claude` remains stable; it installs the root doorbell and does not
 create a new `.claude/CLAUDE.md` bridge. An existing brownfield bridge is
 reported by `--status` and never rewritten silently.
