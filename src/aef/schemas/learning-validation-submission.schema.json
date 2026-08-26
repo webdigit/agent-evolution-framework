@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/aef/learning-validation-submission.schema.json",
+  "title": "AEF Learning Validation Submission",
+  "description": "Human-approved validation of candidate hypotheses. Does not increment confirmation counts or invoke EVALUATE.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "hypotheses", "decision"],
+  "properties": {
+    "protocol": {"const": "aef.learning.validate.submit/v1"},
+    "hypotheses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^hypothesis:[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+      },
+      "uniqueItems": true
+    },
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/citation"}
+    },
+    "decision": {"$ref": "#/$defs/humanDecision"}
+  },
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "digest"],
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "humanDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "actor", "decided_at", "approved"],
+      "properties": {
+        "source": {"const": "human"},
+        "actor": {"type": "string", "minLength": 1},
+        "decided_at": {"type": "string", "minLength": 1},
+        "approved": {"const": true}
+      }
+    }
+  }
+}

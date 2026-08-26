@@ -87,13 +87,19 @@ from .operations import (
 from .record_document import InvalidRecordSubmissionError, build_persisted_record
 from .record_store import InvalidRecordStoreError, persist_record
 from .ingest_intake import IngestBlockedError, InvalidIngestSubmissionError
+from .learning_validation import InvalidLearningValidationError, LearningValidationBlockedError
+from .learning_validation_ops import plan_validate
 from .competency_declaration import (
     CompetencyDeclarationBlockedError,
     InvalidCompetencyDeclarationError,
 )
 from .competency_declaration_ops import plan_declare, recover_declaration
 from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
-from .ingest_ops import INGEST_CONFIRMATION_ANNOUNCEMENT, INGEST_DERIVED_ANNOUNCEMENT, plan_ingest
+from .ingest_ops import (
+    INGEST_CONFIRMATION_ANNOUNCEMENT,
+    INGEST_DERIVED_ANNOUNCEMENT,
+    plan_ingest,
+)
 from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
 from .workspace_resolution import (
     apply_workspace_resolution_to_args,
@@ -327,6 +333,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
         if command not in {
             "INIT", "AUDIT", "DISCOVER", "CONSOLIDATE", "EVALUATE", "INTEGRATE",
             "RECORD", "UPGRADE", "DOCTOR", "INGEST", "COMPETENCY_DECLARE",
+            "LEARNING_VALIDATE",
         } or not isinstance(status, str):
             return False
         allowed = {
@@ -343,6 +350,7 @@ def _valid_human_envelope(envelope: Any) -> bool:
             },
             "INGEST": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
             "COMPETENCY_DECLARE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
+            "LEARNING_VALIDATE": {"CHANGE", "NO_CHANGE", "BLOCKED", "FAILED", "ERROR"},
         }
         if status not in allowed[command]:
             return False
@@ -855,6 +863,42 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
+        if command == "LEARNING_VALIDATE":
+            hypotheses = result.get("hypotheses") or []
+            cited_hypotheses = _escape_human_value(
+                ", ".join(str(item) for item in hypotheses) if hypotheses else "none"
+            )
+            validated = result.get("validated") or []
+            applied = _escape_human_value(
+                ", ".join(str(item) for item in validated) if validated else "none"
+            )
+            if status == "CHANGE":
+                heading = (
+                    "AEF learning validation plan is ready"
+                    if envelope.get("dry_run")
+                    else "AEF validated cited hypotheses"
+                )
+                return (
+                    f"[OK] {heading}\n\n"
+                    f"Hypotheses: {cited_hypotheses}\n"
+                    f"Validated : {applied}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
+                )
+            if status == "NO_CHANGE":
+                return (
+                    "[OK] AEF learning validation is unchanged\n\n"
+                    f"Hypotheses: {cited_hypotheses}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
+                    "Changes   : none\n"
+                )
+            if status == "BLOCKED":
+                reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
+                return (
+                    "[BLOCKED] AEF learning validation is blocked\n\n"
+                    f"Reason    : {reason}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
+                )
+
         marker = "FAILED" if status == "FAILED" else "ERROR"
         safe_status = _escape_human_value(status)
         return f"[{marker}] AEF command ended with status {safe_status}\n"
@@ -1101,6 +1145,34 @@ def _build_parser() -> argparse.ArgumentParser:
     declare_parser.add_argument(
         "--dry-run", action="store_true",
         help="render the exact competency plan without writing",
+    )
+    learning_parser = commands.add_parser(
+        "learning",
+        help="govern learning lifecycle transitions",
+        description=(
+            "Apply explicit human gates on persisted learning state. "
+            "Does not ingest events, derive rules, or grant authority."
+        ),
+    )
+    learning_commands = learning_parser.add_subparsers(
+        dest="learning_command", required=True,
+    )
+    validate_parser = learning_commands.add_parser(
+        "validate",
+        help="validate candidate hypotheses with human approval",
+        description=(
+            "Validate or apply a learning validation document. "
+            "Sets explicit_human_validation on cited hypotheses without "
+            "incrementing confirmations. Not EVALUATE and not INGEST."
+        ),
+    )
+    validate_parser.add_argument(
+        "--validation", required=True, metavar="FILE",
+        help="learning validation document citing hypothesis ids",
+    )
+    validate_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="render the exact knowledge plan without writing",
     )
     return parser
 
@@ -1405,6 +1477,60 @@ def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         diff=diff,
     )
     return envelope, _exit_code("INGEST", status)
+
+
+def _load_validation(path: str | Path) -> Any:
+    try:
+        return _load_snapshot(path)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIInputError(
+            "invalid_json",
+            "The learning validation document is not valid JSON.",
+        ) from exc
+
+
+def _run_learning_validate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    workspace = args.workspace
+    document = _load_validation(args.validation)
+    try:
+        status, result, meta, diff = plan_validate(
+            workspace, document, dry_run=args.dry_run,
+        )
+    except LearningValidationBlockedError as exc:
+        envelope = _envelope(
+            command="LEARNING_VALIDATE",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, _exit_code("LEARNING_VALIDATE", "BLOCKED")
+    except WorkspaceContentionError as exc:
+        envelope = _envelope(
+            command="LEARNING_VALIDATE",
+            workspace=workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=args.dry_run,
+            result={},
+            meta={"reason": exc.code},
+            diff=None,
+        )
+        return envelope, _exit_code("LEARNING_VALIDATE", "BLOCKED")
+    envelope = _envelope(
+        command="LEARNING_VALIDATE",
+        workspace=workspace,
+        status=status,
+        ok=status in {"CHANGE", "NO_CHANGE"},
+        dry_run=args.dry_run,
+        result=result,
+        meta=meta,
+        diff=diff,
+    )
+    return envelope, _exit_code("LEARNING_VALIDATE", status)
 
 
 def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
@@ -2021,6 +2147,8 @@ def _run_command(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return _run_ingest(args)
     if args.command == "competency":
         return _run_competency_declare(args)
+    if args.command == "learning":
+        return _run_learning_validate(args)
     return _run_evaluate(args)
 
 
@@ -2109,6 +2237,11 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         message = str(exc)
         details = {}
         exit_code = 3
+    elif isinstance(exc, InvalidLearningValidationError):
+        code = exc.code
+        message = str(exc)
+        details = {}
+        exit_code = 3
     elif isinstance(exc, InvalidCompetencyDeclarationTransactionError):
         code = "invalid_competency_declaration_transaction"
         message = "The competency declaration transaction is invalid."
@@ -2117,6 +2250,18 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
     elif isinstance(exc, CompetencyDeclarationBlockedError):
         envelope = _envelope(
             command="COMPETENCY_DECLARE",
+            workspace=args.workspace,
+            status="BLOCKED",
+            ok=False,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            result={},
+            meta={"reason": exc.code, **({"details": exc.details} if exc.details else {})},
+            diff=None,
+        )
+        return envelope, 4
+    elif isinstance(exc, LearningValidationBlockedError):
+        envelope = _envelope(
+            command="LEARNING_VALIDATE",
             workspace=args.workspace,
             status="BLOCKED",
             ok=False,
@@ -2217,6 +2362,8 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
         command_name = args.command.upper()
         if args.command == "competency":
             command_name = "COMPETENCY_DECLARE"
+        elif args.command == "learning":
+            command_name = "LEARNING_VALIDATE"
         envelope = _envelope(
             command=command_name,
             workspace=args.workspace,
@@ -2285,6 +2432,8 @@ def _error_envelope(args: argparse.Namespace, exc: Exception) -> tuple[dict[str,
     command_name = args.command.upper()
     if args.command == "competency":
         command_name = "COMPETENCY_DECLARE"
+    if args.command == "learning":
+        command_name = "LEARNING_VALIDATE"
     envelope = _envelope(
         command=command_name,
         workspace=args.workspace,

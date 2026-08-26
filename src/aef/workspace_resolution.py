@@ -16,6 +16,7 @@ CLI_WORKSPACE_CONSUMER_FUNCTIONS = frozenset(
         "_run_audit",
         "_run_record",
         "_run_ingest",
+        "_run_learning_validate",
         "_run_competency_declare",
         "_run_discover",
         "_run_consolidate",

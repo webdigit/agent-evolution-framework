@@ -17,6 +17,7 @@ SCHEMAS = {
     "evaluation.schema.json",
     "exploration.schema.json",
     "knowledge.schema.json",
+    "learning-validation-submission.schema.json",
     "manifest.schema.json",
     "migrations.schema.json",
     "policies.schema.json",

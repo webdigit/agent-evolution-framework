@@ -45,9 +45,12 @@ def confirm_hypothesis(hypotheses, hypothesis_id, *, explicit_human_validation=F
     out = deepcopy(hypotheses)
     for h in out:
         if h.get("id") == hypothesis_id:
-            h["confirmations"] = h.get("confirmations", 0) + (0 if explicit_human_validation else 1)
             if explicit_human_validation:
+                if h.get("explicit_human_validation"):
+                    return "NO_CHANGE", deepcopy(hypotheses)
                 h["explicit_human_validation"] = True
+                return "CHANGE", out
+            h["confirmations"] = h.get("confirmations", 0) + 1
             return "CHANGE", out
     return "NOT_FOUND", out
 

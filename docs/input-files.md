@@ -212,6 +212,31 @@ aef competency declare --recover --dry-run
 aef competency declare --recover
 ```
 
+## LEARNING validation
+
+Use [learning-validation.json](examples/learning-validation.json) after the cited
+hypothesis exists in `.agent/knowledge/knowledge.json`. The bundled example
+assumes [learning-ingest-hypothesis.json](examples/learning-ingest-hypothesis.json)
+was applied after [recording.json](examples/recording.json):
+
+```console
+aef record --recording docs/examples/recording.json
+aef ingest --intake docs/examples/learning-ingest-hypothesis.json
+aef learning validate --validation docs/examples/learning-validation.json --dry-run
+aef learning validate --validation docs/examples/learning-validation.json
+```
+
+The closed root uses protocol `aef.learning.validate.submit/v1`. It requires one
+or more derived hypothesis ids (`hypothesis:…`, produced by AEF — never submit
+`rule:` or `principle:` ids here) and a human `decision` with `source: "human"`,
+non-empty `actor`, RFC 3339 `decided_at`, and `approved: true`. Optional
+`records` cite persisted `record_id` + matching `digest` for audit context.
+
+The command sets `explicit_human_validation: true` on cited candidate hypotheses
+so rule derivation can proceed when the hypothesis gate opens. It does **not**
+increment `confirmations`, invoke EVALUATE, or ingest events. Do not edit
+`.agent/knowledge/knowledge.json` by hand.
+
 ## Refresh and recovery
 
 `aef evaluate --list` is strictly read-only. Refresh may change recommendation

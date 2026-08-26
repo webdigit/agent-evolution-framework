@@ -152,6 +152,27 @@ declaration event as a non-blocking warning; it never invents provenance.
 
 See [Canonical input files](input-files.md) for an executable example.
 
+## LEARNING VALIDATE
+
+```console
+aef learning validate --validation FILE [--dry-run]
+aef --json learning validate --validation FILE [--dry-run]
+```
+
+Apply explicit human validation to one or more **candidate** hypotheses cited
+by derived id (`hypothesis:…`). AEF sets `explicit_human_validation: true` on
+cited hypotheses without changing `confirmations`, unlocking rule derivation
+when the hypothesis gate opens. It does not ingest events, promote competencies,
+derive rules or principles directly, or invoke EVALUATE.
+
+`--json` is global and must precede the command. `--dry-run` projects the exact
+knowledge change without writing. Replaying the same validation returns
+`NO_CHANGE`. A missing hypothesis, a hypothesis already promoted to a rule, a
+missing cited record, or a digest mismatch is `BLOCKED` (exit 4) with no write.
+An invalid document or missing human decision is `ERROR` (exit 3).
+
+See [Canonical input files](input-files.md) for an executable example.
+
 ## DISCOVER
 
 ```console
