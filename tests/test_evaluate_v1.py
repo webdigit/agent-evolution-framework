@@ -7,7 +7,6 @@ from io import StringIO
 
 import pytest
 
-from conftest import installed_aef_script
 
 from aef.filesystem import apply_workspace, load_workspace, render_workspace_plan
 
@@ -555,9 +554,7 @@ def test_mixed_career_and_competency_batch_changes_exactly_three_state_files():
     ("file", 3, "rollback"),
     ("committed", 3, "finalize"),
 ])
-def test_transaction_recovers_after_every_persistence_step(
-    tmp_path, fault_phase, fault_index, expected_action
-):
+def test_transaction_recovers_after_every_persistence_step(tmp_path, fault_phase, fault_index, expected_action):
     from aef.evaluation_transaction import (
         TRANSACTION_PATH, apply_evaluation_transaction,
         recover_evaluation_transaction,
@@ -635,16 +632,12 @@ def test_transaction_dry_run_bytes_match_real_application_and_replay(tmp_path):
     assert not list(tmp_path.rglob("*.tmp"))
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_installed_evaluate_list_modes_are_separated_and_read_only(
-    tmp_path, launcher, mode
-):
+def test_installed_evaluate_list_modes_are_separated_and_read_only(tmp_path, mode):
     source = project(PENDING)
     apply_workspace(tmp_path, load_workspace(tmp_path), source)
     before = (tmp_path / ".agent/state/evaluations.json").read_bytes()
-    script = installed_aef_script()
-    prefix = [sys.executable, "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [sys.executable, "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(
@@ -996,11 +989,8 @@ def test_recovery_preflights_all_files_before_rolling_back_any(tmp_path):
     assert evaluations_path.read_bytes() == evaluation_before
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_invalid_transaction_is_public_code_3_in_every_cli_mode(
-    tmp_path, launcher, mode
-):
+def test_invalid_transaction_is_public_code_3_in_every_cli_mode(tmp_path, mode):
     from aef.evaluation_transaction import (
         TRANSACTION_PATH, build_evaluation_transaction,
     )
@@ -1020,8 +1010,7 @@ def test_invalid_transaction_is_public_code_3_in_every_cli_mode(
         path.relative_to(tmp_path).as_posix(): path.read_bytes()
         for path in tmp_path.rglob("*") if path.is_file()
     }
-    script = installed_aef_script()
-    prefix = [sys.executable, "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [sys.executable, "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(
@@ -1106,9 +1095,7 @@ def test_transaction_capability_cannot_cross_transactions_in_one_workspace(tmp_p
     ".agent/integrations/registry.json",
     ".agent/core/constitution.md",
 ])
-def test_transaction_capability_factory_rejects_forbidden_declared_paths(
-    tmp_path, forbidden
-):
+def test_transaction_capability_factory_rejects_forbidden_declared_paths(tmp_path, forbidden):
     from aef.filesystem import WorkspacePathError, _transaction_write_capability
 
     _, _, journal = _transaction_fixture()
@@ -1219,9 +1206,7 @@ def _prepared_transaction(tmp_path):
 
 
 @pytest.mark.parametrize("forgery", ["value", "other_file", "remove_journal"])
-def test_apply_capability_rejects_every_noncanonical_plan_before_writer(
-    tmp_path, monkeypatch, forgery
-):
+def test_apply_capability_rejects_every_noncanonical_plan_before_writer(tmp_path, monkeypatch, forgery):
     import aef.filesystem as filesystem
 
     current, desired, journal = _prepared_transaction(tmp_path)
@@ -1263,9 +1248,7 @@ def test_apply_capability_rejects_every_noncanonical_plan_before_writer(
     assert after == before
 
 
-def test_apply_capability_accepts_exact_canonical_content_regardless_of_key_order(
-    tmp_path,
-):
+def test_apply_capability_accepts_exact_canonical_content_regardless_of_key_order(tmp_path):
     from aef.filesystem import (
         _apply_workspace_transaction, _transaction_write_capability,
     )
@@ -1327,9 +1310,7 @@ def test_rollback_capability_rejects_noncanonical_final_plans(tmp_path, forgery)
 
 
 @pytest.mark.parametrize("already_restored", [False, True])
-def test_rollback_capability_accepts_exact_before_and_partial_recovery(
-    tmp_path, already_restored
-):
+def test_rollback_capability_accepts_exact_before_and_partial_recovery(tmp_path, already_restored):
     from aef.filesystem import (
         _apply_workspace_transaction, _transaction_write_capability,
     )
@@ -1358,9 +1339,7 @@ def test_rollback_capability_accepts_exact_before_and_partial_recovery(
 
 
 @pytest.mark.parametrize("phase", ["cleanup", "commit"])
-def test_journal_only_phases_reject_arbitrary_business_or_journal_content(
-    tmp_path, phase
-):
+def test_journal_only_phases_reject_arbitrary_business_or_journal_content(tmp_path, phase):
     from aef.filesystem import (
         WorkspacePathError, _apply_workspace_transaction,
         _transaction_write_capability,

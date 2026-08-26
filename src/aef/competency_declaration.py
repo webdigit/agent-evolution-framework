@@ -11,7 +11,7 @@ from typing import Any
 
 import jsonschema
 
-from .identifiers import InvalidCompetencyIdentifierError, validate_competency_id
+from .identifiers import InvalidCompetencyIdentifierError, validate_submitted_competency_id
 from .record_document import InvalidRecordSubmissionError, validate_record_id
 from .schema_validation import draft202012_validator, load_packaged_schema
 from .strict_json import InvalidStrictJSONError, validate_strict_json
@@ -200,7 +200,7 @@ def validate_competency_declaration(document: Any) -> dict[str, Any]:
         _reject("invalid_declaration_protocol", "protocol must be aef.competency.declare.submit/v1.")
 
     try:
-        competency_id = validate_competency_id(document.get("competency_id"))
+        competency_id = validate_submitted_competency_id(document.get("competency_id"))
     except InvalidCompetencyIdentifierError as exc:
         raise InvalidCompetencyDeclarationError(
             "invalid_competency_id", str(exc)

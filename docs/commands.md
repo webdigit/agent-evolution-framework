@@ -10,6 +10,10 @@ aef [--workspace PATH] [--json | --human] [--compact] COMMAND
 use `--json` explicitly. Diagnostics go to stderr; stdout contains one human
 rendering or one `aef.cli/v1` JSON document.
 
+The local pytest suite invokes `python -m aef`; the published console script is
+smoke-tested in CI via `tests/test_console_script_entry.py` (WDAC-blocked hosts
+skip that test with an explicit reason).
+
 ## INIT
 
 ```console
@@ -95,6 +99,7 @@ See [Canonical input files](input-files.md) for an executable example.
 aef integrate agents [--status|--remove] [--dry-run] [--scope project]
 aef integrate claude [--status|--remove] [--dry-run] [--scope project]
 aef integrate gemini [--status|--remove] [--dry-run] [--scope project]
+aef integrate runtime [--status|--remove] [--dry-run] [--scope project]
 aef integrate all [--status|--remove] [--dry-run] [--scope project]
 aef --json integrate claude --status
 ```
@@ -102,6 +107,9 @@ aef --json integrate claude --status
 Install project-local guidance doors. `AGENTS.md` holds the only managed copy
 of readable rules (citations to `.agent/core/` and `docs/runtime.md`).
 `CLAUDE.md` and `GEMINI.md` are doorbells without doctrine rules.
+`integrate runtime` produces `docs/runtime.md` as a pure snapshot of
+`aef doctor` (divergence is périmé/stale, never catalog tampering); `doctor`
+remains read-only.
 `integrate claude` remains stable; it installs the root doorbell and does not
 create a new `.claude/CLAUDE.md` bridge. An existing brownfield bridge is
 reported by `--status` and never rewritten silently.

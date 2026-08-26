@@ -1,18 +1,35 @@
 from pathlib import Path
 import os
-import shutil
 import sys
 import sysconfig
+
+
+def aef_cli_argv(*args: str | os.PathLike[str]) -> list[str]:
+    """Build a CLI argv that invokes ``python -m aef``.
+
+    The main suite uses this form because WDAC on some development hosts blocks
+    ``aef.exe``; console-script coverage lives in ``test_console_script_entry.py``
+    (CI runs it; blocked hosts skip with an explicit reason).
+    """
+    return [sys.executable, "-m", "aef", *(str(item) for item in args)]
 
 
 def installed_aef_script(
     *,
     executable: str | os.PathLike[str] = sys.executable,
     scripts_directory: str | os.PathLike[str] | None = None,
-    path_lookup=shutil.which,
+    path_lookup=None,
     script_name: str | None = None,
 ) -> Path:
-    """Locate the console script installed for the active Python interpreter."""
+    """Locate the console script installed for the active Python interpreter.
+
+    Reserved for unit tests of locator behaviour (``test_cli_launcher``). Do not
+    use the returned path as a subprocess executable — use ``aef_cli_argv``.
+    """
+    import shutil
+
+    if path_lookup is None:
+        path_lookup = shutil.which
     name = script_name or ("aef.exe" if os.name == "nt" else "aef")
     scripts = Path(scripts_directory or sysconfig.get_path("scripts"))
     candidates = (scripts / name, Path(executable).with_name(name))

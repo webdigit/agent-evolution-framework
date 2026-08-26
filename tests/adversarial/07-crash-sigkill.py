@@ -14,7 +14,7 @@ from aef.record_document import build_persisted_record
 AEF = AEF
 
 def cli(ws, *a, timeout=120):
-    r = subprocess.run([AEF, "--json", "--workspace", str(ws), *a],
+    r = subprocess.run([*AEF, "--json", "--workspace", str(ws), *a],
                        capture_output=True, text=True, timeout=timeout)
     try:
         e = json.loads(r.stdout)
@@ -64,7 +64,7 @@ for attempt in range(160):
     ws, p = setup("crash-")
     f = ws / "d.json"
     f.write_text(json.dumps(decl(p, "comp-001")))
-    proc = subprocess.Popen([AEF, "--json", "--workspace", str(ws), "competency", "declare",
+    proc = subprocess.Popen([*AEF, "--json", "--workspace", str(ws), "competency", "declare",
                              "--declaration", str(f)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(random.uniform(0.030, 0.075))

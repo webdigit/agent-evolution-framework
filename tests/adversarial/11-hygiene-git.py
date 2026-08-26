@@ -8,7 +8,7 @@ import json, subprocess, tempfile, shutil
 from pathlib import Path
 
 def cli(ws, *a):
-    return subprocess.run([AEF, "--json", "--workspace", str(ws), *a],
+    return subprocess.run([*AEF, "--json", "--workspace", str(ws), *a],
                           capture_output=True, text=True, timeout=120)
 
 T = Path(tempfile.mkdtemp())

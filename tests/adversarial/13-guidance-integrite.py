@@ -11,7 +11,7 @@ failures = 0
 
 
 def cli(ws, *a, timeout=120):
-    r = subprocess.run([AEF, "--json", "--workspace", str(ws), *a],
+    r = subprocess.run([*AEF, "--json", "--workspace", str(ws), *a],
                        capture_output=True, text=True, timeout=timeout)
     try:
         e = json.loads(r.stdout)

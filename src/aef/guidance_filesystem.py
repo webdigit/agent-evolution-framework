@@ -1,4 +1,4 @@
-"""Atomic read/write for root-level guidance doors (AGENTS.md, CLAUDE.md, GEMINI.md)."""
+"""Atomic read/write for guidance doors (AGENTS.md, doorbells, docs/runtime.md)."""
 
 from __future__ import annotations
 
@@ -36,12 +36,21 @@ def _is_link_or_reparse(path: Path) -> bool:
     return bool(attributes & flag)
 
 
+def _is_allowed_nested_guidance_path(relative: str) -> bool:
+    """True when *relative* may contain a slash (declared door or .claude/)."""
+    if relative.startswith(".claude/"):
+        return True
+    return any(
+        spec["path"] == relative and ("/" in relative or "\\" in relative)
+        for spec in DOOR_SPECS.values()
+    )
+
+
 def _safe_regular_file(root: Path, relative: str, *, required: bool) -> Path | None:
     if "/" in relative or "\\" in relative or relative in {".", ".."}:
-        # Root-level doors only (no nested paths except validated relative).
-        if relative.startswith(".claude/"):
-            pass
-        elif "/" in relative or "\\" in relative:
+        # Nested doors only when they match a declared DOOR_SPECS path (or
+        # the legacy .claude/ bridge prefix).
+        if not _is_allowed_nested_guidance_path(relative):
             raise GuidanceFilesystemError("unsafe guidance path")
     target = root.joinpath(*relative.split("/"))
     current = root

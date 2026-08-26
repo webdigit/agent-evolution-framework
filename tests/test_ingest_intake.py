@@ -54,17 +54,17 @@ def persisted(record_id="session-alpha", digest=None):
             }]),
             "invalid_ingest_submission",
         ),
-        (
-            {
-                "protocol": "aef.ingest.submit/v1",
-                "records": [{
-                    "record_id": "../escape",
-                    "digest": "sha256:" + ("a" * 64),
-                    "events": [{"id": "e1", "novel": True}],
-                }],
-            },
-            "invalid_ingest_submission",
-        ),
+            (
+                {
+                    "protocol": "aef.ingest.submit/v1",
+                    "records": [{
+                        "record_id": "../escape",
+                        "digest": "sha256:" + ("a" * 64),
+                        "events": [{"id": "e1", "novel": True}],
+                    }],
+                },
+                "invalid_record_id",
+            ),
         (
             {
                 "protocol": "aef.ingest.submit/v1",

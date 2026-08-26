@@ -53,6 +53,10 @@ DOCTOR_RESULT_FIELDS = (
     "offline_basis",
 )
 
+# Marker version for the managed consumer card at docs/runtime.md.
+# Independent of GUIDANCE_VERSION on catalog doors.
+RUNTIME_CARD_VERSION = "1.0.0"
+
 
 @dataclass(frozen=True)
 class PackageInstallSpec:
@@ -396,4 +400,107 @@ def diagnose_runtime(workspace: Path, **discovery_hooks: Any) -> dict[str, Any]:
         "observations": observations,
         "offline_basis": offline_basis,
     }
+    assert set(result) == set(DOCTOR_RESULT_FIELDS)
     return result
+
+
+def _format_runtime_card_value(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        if not value:
+            return "—"
+        return ", ".join(f"{key}={value[key]}" for key in sorted(value))
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "—"
+        return ", ".join(str(item) for item in value)
+    text = str(value)
+    return text if text else "—"
+
+
+def render_runtime_card(doctor_result: dict[str, Any]) -> str:
+    """Pure deterministic markdown body for the managed runtime card.
+
+    Same doctor result → same text. No filesystem I/O, no timestamps, no
+    host values outside the doctor result. A written card that diverges from
+    a fresh render is **périmé** (stale), never catalog-tampered.
+    """
+    required = set(DOCTOR_RESULT_FIELDS)
+    missing = required - set(doctor_result)
+    if missing:
+        raise ValueError(f"doctor_result missing fields: {sorted(missing)}")
+    extra = set(doctor_result) - required
+    if extra:
+        raise ValueError(f"doctor_result unexpected fields: {sorted(extra)}")
+
+    decision = doctor_result["decision"]
+    install_command = doctor_result.get("install_command") or ""
+    if decision == DECISION_OK:
+        action_lines = [
+            "No install action is required (`decision: OK`).",
+        ]
+    elif install_command:
+        action_lines = [
+            "Proposed install command for this host (review before running):",
+            "",
+            "```console",
+            install_command,
+            "```",
+        ]
+    else:
+        cause = doctor_result.get("blocked_cause") or "unknown"
+        action_lines = [
+            f"Diagnosis is blocked (`blocked_cause: {cause}`). "
+            "No install command is proposed.",
+        ]
+
+    lines = [
+        "# Runtime environment map",
+        "",
+        "Snapshot of what `aef doctor` reports for this workspace host.",
+        "It is not a live view. Regenerate with `aef integrate runtime`.",
+        "When the file no longer matches the host, it is **périmé** (stale) —",
+        "regenerate; do not treat divergence as catalog tampering.",
+        "",
+        "Trust : tree read only (pip install not verified)",
+        "",
+        "## Environment",
+        "",
+    ]
+    for field in DOCTOR_RESULT_FIELDS:
+        lines.append(f"- `{field}`: {_format_runtime_card_value(doctor_result[field])}")
+    lines.extend(["", "## Action", ""])
+    lines.extend(action_lines)
+    lines.extend(
+        [
+            "",
+            "## Limits of this attestation",
+            "",
+            "- Tree read of declared env paths is not a verified install check.",
+            "- `pip install` success is never attested here.",
+            "- Paths are workspace-relative when possible; this card must not",
+            "  embed personal home directories as authoritative identity.",
+            "",
+            "## Refresh",
+            "",
+            "```console",
+            "aef integrate runtime",
+            "aef doctor",
+            "```",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def wrap_runtime_segment(card_body: str) -> bytes:
+    """Wrap a rendered card body in RUNTIME managed markers (UTF-8 bytes)."""
+    body = card_body if card_body.endswith("\n") else f"{card_body}\n"
+    return (
+        f'<!-- AEF:RUNTIME:BEGIN version="{RUNTIME_CARD_VERSION}" -->\n'
+        f"{body}"
+        f"<!-- AEF:RUNTIME:END -->\n"
+    ).encode("utf-8")

@@ -15,7 +15,7 @@ EV = ".agent/state/evaluation-transaction.json"
 UP = ".agent/state/upgrade-transaction.json"
 
 def cli(ws, *a):
-    r = subprocess.run([AEF, "--json", "--workspace", str(ws), *a],
+    r = subprocess.run([*AEF, "--json", "--workspace", str(ws), *a],
                        capture_output=True, text=True, timeout=120)
     try:
         e = json.loads(r.stdout)

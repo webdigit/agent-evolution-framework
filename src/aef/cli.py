@@ -31,7 +31,11 @@ from .filesystem import (
 from .upgrade_plan import MigrationFailure
 from .upgrade_ops import run_upgrade
 from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
-from .runtime_doctor import diagnose_runtime
+from .runtime_doctor import (
+    diagnose_runtime,
+    render_runtime_card,
+    wrap_runtime_segment,
+)
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -70,6 +74,7 @@ from .guidance_integration import (
     AGENTS_PATH,
     plan_claude_door,
     plan_door_integration,
+    plan_runtime_integration,
 )
 from .operations import (
     InvalidDiscoveryRegistryError,
@@ -90,6 +95,10 @@ from .competency_declaration_ops import plan_declare, recover_declaration
 from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
 from .ingest_ops import plan_ingest
 from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
+from .workspace_resolution import (
+    apply_workspace_resolution_to_args,
+    workspace_resolution_meta,
+)
 
 
 API_VERSION = "aef.cli/v1"
@@ -134,6 +143,20 @@ def _envelope(
         "diff": diff,
         "error": error,
     }
+
+
+def _attach_workspace_resolution_meta(
+    envelope: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    resolution = getattr(args, "workspace_resolution", None)
+    if resolution is None:
+        return envelope
+    merged = dict(envelope)
+    meta = dict(merged.get("meta") or {})
+    meta.update(workspace_resolution_meta(resolution))
+    merged["meta"] = meta
+    return merged
 
 
 def _write_envelope(envelope: dict[str, Any], *, compact: bool) -> None:
@@ -246,6 +269,28 @@ def _display_workspace(envelope: dict[str, Any]) -> str:
     return str(Path(envelope["workspace"]))
 
 
+def _human_workspace_suffix(envelope: dict[str, Any]) -> str:
+    meta = envelope.get("meta") or {}
+    status = envelope.get("status")
+    lines: list[str] = []
+    resolution = meta.get("workspace_resolution")
+    if isinstance(resolution, dict) and resolution.get("walked_up"):
+        from_path = _escape_human_value(resolution.get("from", "unknown"))
+        lines.append(f"Resolved  : walked up from {from_path}")
+    notice = meta.get("explicit_workspace_notice")
+    if isinstance(notice, dict) and notice.get("agent_workspace"):
+        agent_workspace = _escape_human_value(notice["agent_workspace"])
+        lines.append(
+            "Context   : explicit workspace has no .agent/; "
+            f"a workspace exists at {agent_workspace}"
+        )
+    if meta.get("no_agent_in_start_or_ancestors") and status in {"BLOCKED", "FAILED", "FAIL"}:
+        lines.append("Context   : no .agent/ here or in any parent directory")
+    if not lines:
+        return ""
+    return "\n" + "\n".join(lines)
+
+
 def _human_finding(finding: Any) -> str:
     if isinstance(finding, str):
         return _escape_human_value(finding)
@@ -341,6 +386,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
         status = envelope["status"]
         result = envelope["result"]
         workspace = _escape_human_value(_display_workspace(envelope))
+        workspace_suffix = _human_workspace_suffix(envelope)
 
         if status == "ERROR":
             error = envelope["error"]
@@ -351,13 +397,13 @@ def _render_human(envelope: dict[str, Any]) -> str:
         if status == "BLOCKED" and envelope["meta"].get("reason") == "upgrade_recovery_required":
             return (
                 "[BLOCKED] AEF upgrade recovery is required\n\n"
-                f"Workspace : {workspace}\n"
+                f"Workspace : {workspace}{workspace_suffix}\n"
                 "Reason    : upgrade recovery required\n"
             )
         if status == "BLOCKED" and envelope["meta"].get("reason") == "evaluation_recovery_required":
             return (
                 "[BLOCKED] AEF evaluation recovery is required\n\n"
-                f"Workspace : {workspace}\n"
+                f"Workspace : {workspace}{workspace_suffix}\n"
                 "Reason    : evaluation recovery required\n"
             )
 
@@ -373,7 +419,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     "[OK] AEF initialized\n\n"
                     f"Role      : {role}\n"
                     f"Version   : {framework_version}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     f"Files     : {created_text} created\n"
                 )
             if status == "NO_CHANGE":
@@ -383,7 +429,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[OK] AEF is already initialized\n\n"
                     f"Version   : {framework_version}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
             if status == "BLOCKED":
@@ -399,7 +445,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[BLOCKED] AEF initialization blocked\n\n"
                     f"Reason    : {readable}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "AUDIT":
@@ -407,12 +453,15 @@ def _render_human(envelope: dict[str, Any]) -> str:
             if status == "PASS":
                 return (
                     "[OK] AEF audit passed\n\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Findings  : none\n"
                 )
             if status == "FAIL":
                 lines = "\n".join(f"- {_human_finding(item)}" for item in findings)
-                return f"[FAILED] AEF audit found problems\n\n{lines}\n"
+                return (
+                    f"[FAILED] AEF audit found problems\n\n{lines}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
+                )
 
         if command == "DISCOVER":
             connectors = _escape_human_value(result.get("connectors", "unknown"))
@@ -427,7 +476,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 )
                 return (
                     f"{heading}\n\n"
-                    f"Workspace   : {workspace}\n"
+                    f"Workspace   : {workspace}{workspace_suffix}\n"
                     f"Connectors  : {connectors}\n"
                     f"Capabilities: {capabilities}\n"
                     "Authority   : unchanged\n"
@@ -435,7 +484,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
             if status == "NO_CHANGE":
                 return (
                     "[OK] Connector discovery found no changes\n\n"
-                    f"Workspace   : {workspace}\n"
+                    f"Workspace   : {workspace}{workspace_suffix}\n"
                     f"Connectors  : {connectors}\n"
                     f"Capabilities: {capabilities}\n"
                     "Authority   : unchanged\n"
@@ -444,7 +493,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
             if status == "BLOCKED":
                 return (
                     "[BLOCKED] Connector discovery requires an initialized AEF workspace\n\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "CONSOLIDATE":
@@ -458,20 +507,20 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 )
                 suffix = " would change" if envelope.get("dry_run") is True else " changed"
                 return (
-                    f"{heading}\n\nWorkspace : {workspace}\nReviews   : {reviews}\n"
+                    f"{heading}\n\nWorkspace : {workspace}{workspace_suffix}\nReviews   : {reviews}\n"
                     f"Rules     : {changed}{suffix}\nAuthority : unchanged\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF knowledge needs no consolidation\n\n"
-                    f"Workspace : {workspace}\nReviews   : {reviews}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\nReviews   : {reviews}\n"
                     "Changes   : none\nAuthority : unchanged\n"
                 )
             if status == "BLOCKED":
                 reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
                 return (
                     "[BLOCKED] AEF knowledge consolidation is blocked\n\n"
-                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}\n"
+                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "EVALUATE":
@@ -484,7 +533,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                         if envelope.get("dry_run") is True
                         else "[OK] AEF evaluation recovery completed"
                     )
-                    return f"{heading}\n\nWorkspace : {workspace}\nAction    : {action}\n"
+                    return f"{heading}\n\nWorkspace : {workspace}{workspace_suffix}\nAction    : {action}\n"
                 heading = (
                     "[OK] AEF evaluation would be applied"
                     if envelope.get("dry_run") is True
@@ -503,7 +552,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     if not recommendations:
                         return (
                             "[OK] No promotion recommendations require review\n\n"
-                            f"Workspace : {workspace}\nPending   : none\n"
+                            f"Workspace : {workspace}{workspace_suffix}\nPending   : none\n"
                         )
                     lines = []
                     for item in recommendations:
@@ -522,18 +571,18 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     )
                     return (
                         "[OK] Promotion recommendations require review\n\n"
-                        f"Workspace : {workspace}\nPending   : {pending}\n\n"
+                        f"Workspace : {workspace}{workspace_suffix}\nPending   : {pending}\n\n"
                         + "\n".join(lines) + recovery + "\n"
                     )
                 return (
                     "[OK] AEF evaluation needs no changes\n\n"
-                    f"Workspace : {workspace}\nChanges   : none\nPending   : {pending}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\nChanges   : none\nPending   : {pending}\n"
                 )
             if status == "BLOCKED":
                 reason = _escape_human_value(envelope["meta"].get("reason", "blocked"))
                 return (
                     "[BLOCKED] AEF evaluation cannot proceed\n\n"
-                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}\n"
+                    f"Reason    : {reason.replace('_', ' ')}\nWorkspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "INTEGRATE":
@@ -547,7 +596,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[BLOCKED] Guidance integration cannot be updated safely\n\n"
                     f"Reason    : {reason.replace('_', ' ')}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if result.get("status_only") is True:
                 warnings = result.get("warnings", [])
@@ -560,10 +609,27 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 if not result.get("installed"):
                     return (
                         f"[OK] Guidance integration ({integration}) is not installed\n\n"
-                        f"Workspace : {workspace}\nWarnings  : {warning_text}\n"
+                        f"Workspace : {workspace}{workspace_suffix}\nWarnings  : {warning_text}\n"
                     )
+                doors = result.get("doors") or {}
+                stale_doors = [
+                    name for name, info in doors.items()
+                    if (info.get("bridge") or {}).get("state") == "stale"
+                    or info.get("freshness") == "stale"
+                ]
                 audit = _escape_human_value(result.get("audit", "unknown"))
                 reviews = _escape_human_value(result.get("pending_reviews", "unknown"))
+                if stale_doors:
+                    stale_list = ", ".join(
+                        _escape_human_value(name) for name in stale_doors
+                    )
+                    return (
+                        f"[OK] Guidance integration ({integration}) is installed\n\n"
+                        f"Freshness : périmé (stale) — {stale_list}; "
+                        "regenerate with `aef integrate runtime`\n"
+                        f"Doctrine : loaded\nAudit    : {audit}\n"
+                        f"Reviews  : {reviews} pending\nWarnings : {warning_text}\n"
+                    )
                 return (
                     f"[OK] Guidance integration ({integration}) is healthy\n\n"
                     f"Doctrine : loaded\nAudit    : {audit}\n"
@@ -587,7 +653,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     f"{heading}\n\nScope       : {scope}\n"
                     f"Doctrine    : {doctrine} files linked\n"
-                    f"Workspace   : {workspace}\nEnforcement : {enforcement}\n"
+                    f"Workspace   : {workspace}{workspace_suffix}\nEnforcement : {enforcement}\n"
                 )
             if action == "remove":
                 return (
@@ -609,12 +675,12 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     heading = "AEF upgraded the workspace"
                 return (
                     f"[OK] {heading}\n\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF workspace is already current\n\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
             if status == "BLOCKED":
@@ -622,12 +688,12 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[BLOCKED] AEF upgrade is blocked\n\n"
                     f"Reason    : {reason}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "FAILED":
                 return (
                     "[FAILED] AEF upgrade failed\n\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "DOCTOR":
@@ -639,7 +705,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
                     )
-                lines.append(f"Workspace : {workspace}")
+                lines.append(f"Workspace : {workspace}{workspace_suffix}")
                 return "\n".join(lines) + "\n"
             if status == "INSTALL_REQUIRED":
                 command_line = _escape_human_value(result.get("install_command") or "")
@@ -655,7 +721,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 lines.extend([
                     f"Install   : {command_line}",
                     "Action    : run the Install command manually after review",
-                    f"Workspace : {workspace}",
+                    f"Workspace : {workspace}{workspace_suffix}",
                 ])
                 return "\n".join(lines) + "\n"
             if status == "BLOCKED":
@@ -677,7 +743,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     lines.append(
                         f"Notes     : {_escape_human_value(', '.join(str(item) for item in observations))}"
                     )
-                lines.append(f"Workspace : {workspace}")
+                lines.append(f"Workspace : {workspace}{workspace_suffix}")
                 return "\n".join(lines) + "\n"
 
         if command == "RECORD":
@@ -686,13 +752,13 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[OK] AEF recorded a declaration\n\n"
                     f"Record    : {record_id}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF record is unchanged\n\n"
                     f"Record    : {record_id}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
             if status == "BLOCKED":
@@ -700,7 +766,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     "[BLOCKED] AEF record conflicts with an existing file\n\n"
                     f"Record    : {record_id}\n"
                     "Reason    : record conflict\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "INGEST":
@@ -722,13 +788,13 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"Records   : {cited}\n"
                     f"Events    : {events_accepted}\n"
                     f"Signals   : {signals}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF ingest is unchanged\n\n"
                     f"Records   : {cited}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
             if status == "BLOCKED":
@@ -736,7 +802,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[BLOCKED] AEF ingest is blocked\n\n"
                     f"Reason    : {reason}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         if command == "COMPETENCY_DECLARE":
@@ -753,12 +819,12 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     return (
                         f"[OK] {heading}\n\n"
                         f"Action    : {action}\n"
-                        f"Workspace : {workspace}\n"
+                        f"Workspace : {workspace}{workspace_suffix}\n"
                     )
                 if status == "NO_CHANGE":
                     return (
                         "[OK] No competency declaration recovery required\n\n"
-                        f"Workspace : {workspace}\n"
+                        f"Workspace : {workspace}{workspace_suffix}\n"
                     )
             projected = result.get("projected") if isinstance(result.get("projected"), dict) else {}
             level = _escape_human_value(projected.get("level", "L1"))
@@ -772,13 +838,13 @@ def _render_human(envelope: dict[str, Any]) -> str:
                     f"[OK] {heading}\n\n"
                     f"Competency: {competency_id}\n"
                     f"Level     : {level}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF competency declaration is unchanged\n\n"
                     f"Competency: {competency_id}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
             if status == "BLOCKED":
@@ -786,7 +852,7 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     "[BLOCKED] AEF competency declaration is blocked\n\n"
                     f"Reason    : {reason}\n"
-                    f"Workspace : {workspace}\n"
+                    f"Workspace : {workspace}{workspace_suffix}\n"
                 )
 
         marker = "FAILED" if status == "FAILED" else "ERROR"
@@ -828,8 +894,8 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog="Automation should pass --json explicitly. Run 'aef COMMAND --help' for details.",
     )
     parser.add_argument(
-        "--workspace", default=".", metavar="PATH",
-        help="project workspace root (default: current directory)",
+        "--workspace", default=None, metavar="PATH",
+        help="project workspace root (default: current directory, with walk-up to .agent/)",
     )
     parser.add_argument(
         "--compact", action="store_true",
@@ -939,12 +1005,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "Install, inspect, or remove the managed GEMINI.md doorbell (no doctrine rules).",
     )
     _door_parser(
-        "all",
-        "manage AGENTS.md plus Claude and Gemini doorbells",
+        "runtime",
+        "manage the docs/runtime.md environment map",
         (
-            "Apply, inspect, or remove the shared commun and root doorbells together. "
-            "No door is written if any requested door is blocked. "
-            "Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
+            "Install, inspect, or remove the managed runtime environment map "
+            "(pure render of `aef doctor`). Divergence is périmé/stale, never "
+            "catalog tampering. Does not write via doctor."
+        ),
+    )
+    _door_parser(
+        "all",
+        "manage AGENTS.md, doorbells, and the runtime map",
+        (
+            "Apply, inspect, or remove the shared commun, root doorbells, and "
+            "runtime map together. No door is written if any requested door is "
+            "blocked. Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
         ),
     )
     upgrade_parser = commands.add_parser(
@@ -1045,6 +1120,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             parser.error("argument --declaration: not allowed with argument --recover")
         if not args.recover and not args.declaration:
             parser.error("argument --declaration is required unless --recover is set")
+    apply_workspace_resolution_to_args(args)
     return args
 
 
@@ -1123,7 +1199,7 @@ def _init_result(state: dict[str, Any], instance_id: str, meta: dict[str, Any]) 
 
 
 def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     current = load_workspace(workspace)
     decisions_path = ".agent/state/decisions.json"
@@ -1197,7 +1273,7 @@ def _run_init(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def _run_audit(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     result = audit_project(load_workspace(workspace), root=workspace)
     status = result["status"]
@@ -1225,7 +1301,7 @@ def _load_recording(path: str | Path) -> Any:
 
 
 def _run_record(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     document = _load_recording(args.recording)
     try:
         persisted = build_persisted_record(document)
@@ -1287,7 +1363,7 @@ def _load_declaration(path: str | Path) -> Any:
 
 
 def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     document = _load_intake(args.intake)
     try:
         status, result, meta, diff = plan_ingest(
@@ -1331,7 +1407,7 @@ def _run_ingest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def _run_competency_declare(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     try:
         if args.recover:
             status, result, meta, diff = recover_declaration(
@@ -1485,7 +1561,7 @@ def _collect_interactive_decisions(recommendations):
 
 
 def _run_discover(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     current = load_workspace(workspace)
     snapshot = _load_snapshot(args.snapshot)
@@ -1514,7 +1590,7 @@ def _run_discover(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def _run_consolidate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     current = load_workspace(workspace)
     reviews = _load_snapshot(args.reviews)
@@ -1560,7 +1636,7 @@ def _evaluation_result(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_evaluate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     current = load_workspace(workspace)
     if args.list_only:
@@ -1646,7 +1722,7 @@ def _claude_settings_warnings(workspace: Path) -> list[str]:
 
 
 def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    if args.integration not in {"agents", "claude", "gemini", "all"}:
+    if args.integration not in {"agents", "claude", "gemini", "runtime", "all"}:
         raise CLIInputError("unsupported_integration", "The integration is unsupported.")
     if args.scope != "project":
         raise CLIInputError(
@@ -1654,7 +1730,7 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "Only project-scoped guidance integration is supported.",
             {"scope": args.scope},
         )
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     _validate_json_documents(workspace)
     current = load_workspace(workspace)
     doctrine_error = None
@@ -1665,11 +1741,11 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             doctrine_error = "missing_aef_doctrine"
 
     requested = (
-        ["agents", "claude", "gemini"] if args.integration == "all"
+        ["agents", "claude", "gemini", "runtime"] if args.integration == "all"
         else [args.integration]
     )
     if args.remove and args.integration == "all":
-        requested = ["gemini", "claude", "agents"]
+        requested = ["runtime", "gemini", "claude", "agents"]
     plan_order = list(requested)
     if (
         not args.status_only
@@ -1678,6 +1754,11 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         and "agents" not in plan_order
     ):
         plan_order = ["agents", *plan_order]
+
+    runtime_expected: bytes | None = None
+    if "runtime" in plan_order:
+        doctor_result = diagnose_runtime(workspace)
+        runtime_expected = wrap_runtime_segment(render_runtime_card(doctor_result))
 
     aggregate_status = "NO_CHANGE"
     aggregate_diff = {"created": [], "modified": [], "removed": []}
@@ -1706,6 +1787,15 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 else:
                     existing = root_existing
                     relative = meta.get("bridge_path") or door_path("claude")
+            elif door == "runtime":
+                assert runtime_expected is not None
+                existing = read_guidance_file(workspace, door_path("runtime"))
+                status, _, meta = plan_runtime_integration(
+                    current, existing,
+                    expected_bytes=runtime_expected,
+                    remove=args.remove, status_only=args.status_only,
+                )
+                relative = meta.get("bridge_path") or door_path("runtime")
             else:
                 existing = read_guidance_file(workspace, door_path(door))
                 status, _, meta = plan_door_integration(
@@ -1763,7 +1853,7 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         meta = item["meta"]
         status = item["status"]
         root_state = (meta.get("bridge") or {}).get("state")
-        installed = root_state == "installed"
+        installed = root_state in {"installed", "stale"}
         if item["door"] == "claude":
             legacy_state = (meta.get("legacy_bridge") or {}).get("state")
             if root_state == "installed":
@@ -1784,6 +1874,8 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         state = (item["meta"].get("bridge") or {}).get("state")
         if state == "installed":
             return True
+        if state == "stale":
+            return False
         if item["door"] == "claude":
             legacy = (item["meta"].get("legacy_bridge") or {}).get("state")
             if state == "absent" and legacy == "installed":
@@ -1818,6 +1910,9 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             and not any_blocked
         ):
             extra["co_installed"] = True
+        freshness = item["meta"].get("freshness")
+        if freshness is not None:
+            extra["freshness"] = freshness
         report = (
             item["door"] in requested
             or extra.get("co_installed")
@@ -1937,7 +2032,7 @@ def _doctor_status_from_decision(decision: str) -> tuple[str, bool]:
 
 
 def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     result = diagnose_runtime(workspace)
     decision = result["decision"]
     status, ok = _doctor_status_from_decision(decision)
@@ -1960,7 +2055,7 @@ def _run_doctor(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def _run_upgrade(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    workspace = Path(args.workspace).resolve()
+    workspace = args.workspace
     if args.recover and args.dry_run:
         mode = "recover_dry_run"
     elif args.recover:
@@ -2207,6 +2302,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
         envelope, exit_code = _run_command(args)
+        envelope = _attach_workspace_resolution_meta(envelope, args)
         if args.verbose:
             if isinstance(envelope, dict):
                 command = _escape_human_value(envelope.get("command", "unknown"))
@@ -2216,6 +2312,7 @@ def main(argv: list[str] | None = None) -> int:
                 _write_stderr("aef: invalid internal result\n")
     except Exception as exc:
         envelope, exit_code = _error_envelope(args, exc)
+        envelope = _attach_workspace_resolution_meta(envelope, args)
         error = envelope.get("error")
         if isinstance(error, dict):
             if args.verbose:

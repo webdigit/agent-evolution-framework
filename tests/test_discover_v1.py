@@ -6,7 +6,6 @@ import sys
 
 import pytest
 
-from conftest import installed_aef_script
 
 import aef.cli as cli
 import aef.operations as operations
@@ -135,9 +134,7 @@ def test_snapshot_cannot_inject_authority_annotations_for_new_capability():
 
 @pytest.mark.parametrize("invalid_key", [1, 1.5, True, None, ("tuple",)])
 @pytest.mark.parametrize("location", ["root", "metadata", "nested_metadata"])
-def test_discovery_rejects_non_text_json_keys_at_every_depth(
-    invalid_key, location
-):
+def test_discovery_rejects_non_text_json_keys_at_every_depth(invalid_key, location):
     discovered = snapshot()
     if location == "root":
         discovered[invalid_key] = "invalid"
@@ -296,10 +293,7 @@ def test_cli_discover_human_output_and_blocked_code(tmp_path, capsys):
     assert blocked_output.startswith("[BLOCKED] Connector discovery requires an initialized AEF workspace")
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
-def test_discover_subprocess_non_tty_is_json_and_invalid_input_is_code_three(
-    tmp_path, launcher
-):
+def test_discover_subprocess_non_tty_is_json_and_invalid_input_is_code_three(tmp_path):
     workspace = tmp_path / "workspace"
     initialize_workspace(workspace)
     good = tmp_path / "snapshot.json"
@@ -307,8 +301,7 @@ def test_discover_subprocess_non_tty_is_json_and_invalid_input_is_code_three(
     good.write_text(json.dumps(snapshot()), encoding="utf-8")
     bad.write_text("{invalid", encoding="utf-8")
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
 
     completed = subprocess.run(
         [*prefix, "--workspace", str(workspace), "discover", "--snapshot", str(good)],
@@ -338,11 +331,8 @@ def test_snapshot_and_persisted_registry_have_distinct_domain_errors():
         operations.discover_project(project, snapshot())
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_invalid_persisted_registry_is_publicly_classified_without_leaks(
-    tmp_path, launcher, mode
-):
+def test_invalid_persisted_registry_is_publicly_classified_without_leaks(tmp_path, mode):
     workspace = tmp_path / "workspace"
     initialize_workspace(workspace)
     registry_path = workspace / REGISTRY_PATH
@@ -352,8 +342,7 @@ def test_invalid_persisted_registry_is_publicly_classified_without_leaks(
     supplied.write_text(json.dumps(snapshot()), encoding="utf-8")
 
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     output_option = "--human" if mode == "human" else f"--{mode}"
     completed = subprocess.run(
         [

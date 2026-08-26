@@ -9,12 +9,18 @@ settings change.
 aef integrate agents
 aef integrate claude
 aef integrate gemini
+aef integrate runtime
 aef integrate all
 ```
 
 `aef integrate claude` remains the public Claude entry point. It installs the
 root `CLAUDE.md` doorbell and co-installs `AGENTS.md` when needed. It does
 **not** create a new fat bridge under `.claude/`.
+
+`aef integrate runtime` writes the managed environment map at `docs/runtime.md`
+as a pure render of `aef doctor`. `doctor` itself stays read-only. When the map
+no longer matches the host it is **périmé** (stale), never catalog-tampered;
+`--status` reports that without writing.
 
 The V1 workspace contract supports only the `project` scope, which is also
 the default. User and hybrid scopes are not supported.
@@ -31,8 +37,15 @@ The managed segment cites (does not copy) the five doctrine files:
 - `.agent/core/levels.md`
 - `.agent/core/scoring.md`
 
-It also points once at `docs/runtime.md` for the Python runtime path
-(`aef doctor` before transitions). It does not triplicate `INSTALL_REQUIRED`.
+It also points once at `docs/runtime.md` for the Python runtime path and tells
+operators to produce or refresh that map with `aef integrate runtime`. It does
+not triplicate `INSTALL_REQUIRED`.
+
+### Runtime map — `docs/runtime.md`
+
+Managed segment between `AEF:RUNTIME` markers. Host-dependent: idempotence is
+determinism of the doctor render, not a fixed catalog. Divergence → stale /
+périmé (regenerate), not modified / tampered.
 
 ### Doorbells
 

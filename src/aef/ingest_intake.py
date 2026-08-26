@@ -39,6 +39,38 @@ def _reject(code: str, message: str) -> None:
     raise InvalidIngestSubmissionError(code, message)
 
 
+def _validate_submitted_identifiers(document: dict[str, Any]) -> None:
+    citations = document.get("records")
+    if not isinstance(citations, list):
+        return
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        if isinstance(citation.get("record_id"), str):
+            try:
+                validate_record_id(citation.get("record_id"))
+            except InvalidRecordSubmissionError as exc:
+                raise InvalidIngestSubmissionError(exc.code, str(exc)) from exc
+        events = citation.get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            try:
+                event_id = event.get("id")
+                if isinstance(event_id, str):
+                    validate_record_id(event_id)
+                pattern_key = event.get("pattern_key")
+                if isinstance(pattern_key, str):
+                    validate_record_id(pattern_key)
+                competency = event.get("competency")
+                if isinstance(competency, str):
+                    validate_record_id(competency)
+            except InvalidRecordSubmissionError as exc:
+                raise InvalidIngestSubmissionError(exc.code, str(exc)) from exc
+
+
 def validate_ingest_submission(document: Any) -> dict[str, Any]:
     """Validate an aef.ingest.submit/v1 document without touching the filesystem."""
     if not isinstance(document, dict):
@@ -49,6 +81,7 @@ def validate_ingest_submission(document: Any) -> dict[str, Any]:
         raise InvalidIngestSubmissionError(
             "invalid_ingest_submission", "The ingest document is not strict JSON."
         ) from exc
+    _validate_submitted_identifiers(document)
     try:
         schema = load_packaged_schema("ingest-submission.schema.json")
         draft202012_validator(schema).validate(document)

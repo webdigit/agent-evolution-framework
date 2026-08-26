@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from conftest import installed_aef_script
 
 from aef import cli
 from aef.filesystem import apply_workspace, load_workspace, render_workspace_plan
@@ -97,9 +96,7 @@ def test_init_generates_reproducible_identity_and_timestamp(tmp_path, capsys, mo
     (("--instance-id", "other"), "instance_id_mismatch"),
     (("--role", "other-role"), "decision_conflict"),
 ])
-def test_init_explicit_conflicts_are_blocked_without_writes(
-    tmp_path, capsys, arguments, reason
-):
+def test_init_explicit_conflicts_are_blocked_without_writes(tmp_path, capsys, arguments, reason):
     base = init_args(
         tmp_path, "--instance-id", "agent-1", "--role", "generalist-agent",
         "--created-at", "2026-08-14T10:00:00Z",
@@ -155,9 +152,7 @@ def test_init_dry_run_returns_full_diff_without_creating_agent_directory(tmp_pat
     (("--dry-run", "--instance-id", "agent-1"), ["created_at"]),
     (("--dry-run", "--created-at", "2026-08-14T10:00:00Z"), ["instance_id"]),
 ])
-def test_new_workspace_dry_run_requires_all_stable_inputs_before_generation(
-    tmp_path, capsys, monkeypatch, arguments, missing
-):
+def test_new_workspace_dry_run_requires_all_stable_inputs_before_generation(tmp_path, capsys, monkeypatch, arguments, missing):
     monkeypatch.setattr(cli.uuid, "uuid4", lambda: pytest.fail("UUID must not be generated"))
     monkeypatch.setattr(cli, "_utc_now", lambda: pytest.fail("time must not be generated"))
 
@@ -180,9 +175,7 @@ def test_new_workspace_dry_run_requires_all_stable_inputs_before_generation(
 
 
 @pytest.mark.parametrize("mode", ["--json", "--compact"])
-def test_new_workspace_dry_run_reports_stable_inputs_in_machine_modes(
-    tmp_path, capsys, mode
-):
+def test_new_workspace_dry_run_reports_stable_inputs_in_machine_modes(tmp_path, capsys, mode):
     code = cli.main([
         mode, "--workspace", str(tmp_path), "init", "--role", "operator", "--dry-run",
     ])
@@ -351,9 +344,7 @@ def test_malformed_json_is_invalid_configuration(tmp_path, capsys):
     (PermissionError("denied"), 6, "filesystem_error"),
     (RuntimeError("private-runtime-detail"), 70, "internal_error"),
 ])
-def test_recognized_command_failures_stay_in_json_envelope(
-    tmp_path, capsys, monkeypatch, exception, exit_code, error_code
-):
+def test_recognized_command_failures_stay_in_json_envelope(tmp_path, capsys, monkeypatch, exception, exit_code, error_code):
     monkeypatch.setattr(cli, "load_workspace", lambda _workspace: (_ for _ in ()).throw(exception))
 
     code, envelope, captured = invoke(capsys, "--workspace", str(tmp_path), "audit")
@@ -377,13 +368,9 @@ def test_init_preserves_files_outside_agent(tmp_path, capsys):
     assert outside.read_text(encoding="utf-8") == "owned by user\n"
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
-def test_module_and_installed_script_emit_one_json_document_and_real_exit_code(
-    tmp_path, launcher
-):
+def test_module_and_installed_script_emit_one_json_document_and_real_exit_code(tmp_path):
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     completed = subprocess.run(
         [*prefix, "--workspace", str(tmp_path), "audit"],
         capture_output=True,
@@ -468,9 +455,7 @@ def test_subprocess_rejects_malformed_decisions_document_without_writes(tmp_path
 
 
 @pytest.mark.parametrize("verbose", [False, True])
-def test_subprocess_json_error_has_stable_stdout_and_filtered_stderr(
-    tmp_path, verbose
-):
+def test_subprocess_json_error_has_stable_stdout_and_filtered_stderr(tmp_path, verbose):
     manifest = tmp_path / ".agent" / "manifest.json"
     manifest.parent.mkdir()
     secret = "do-not-disclose-this-token"
@@ -560,12 +545,10 @@ def test_subprocess_filesystem_error_uses_public_message(tmp_path):
     assert "Traceback" not in completed.stderr
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
-def test_subprocess_cli_protocol_is_cp1252_safe_for_unicode_workspace(tmp_path, launcher):
+def test_subprocess_cli_protocol_is_cp1252_safe_for_unicode_workspace(tmp_path):
     workspace = tmp_path / "workspace espaces é 日本"
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     environment = os.environ.copy()
     environment["PYTHONIOENCODING"] = "cp1252:strict"
     common = ["--workspace", str(workspace), "--compact"]
@@ -619,13 +602,11 @@ def test_subprocess_indented_json_is_ascii_safe_for_unicode_workspace(tmp_path):
     assert b"Traceback" not in completed.stdout + completed.stderr
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
-def test_forced_human_subprocess_init_replay_audit_and_blocked(tmp_path, launcher):
+def test_forced_human_subprocess_init_replay_audit_and_blocked(tmp_path):
     workspace = tmp_path / "human workspace"
     blocked_workspace = tmp_path / "blocked workspace"
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     common = [*prefix, "--human", "--workspace", str(workspace)]
 
     initialized = subprocess.run(
@@ -705,8 +686,7 @@ def test_human_and_json_modes_keep_identical_exit_codes(tmp_path):
     assert json.loads(machine.stdout)["status"] == "FAIL"
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
-def test_subprocess_incomplete_human_envelope_is_fail_safe(tmp_path, launcher):
+def test_subprocess_incomplete_human_envelope_is_fail_safe(tmp_path):
     hooks = tmp_path / "hooks"
     hooks.mkdir()
     hooks.joinpath("sitecustomize.py").write_text(
@@ -717,8 +697,7 @@ def test_subprocess_incomplete_human_envelope_is_fail_safe(tmp_path, launcher):
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(hooks) + os.pathsep + environment.get("PYTHONPATH", "")
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
 
     completed = subprocess.run(
         [*prefix, "--human", "audit"], capture_output=True, text=True,
@@ -767,9 +746,7 @@ def test_auto_mode_uses_human_output_on_real_pty(tmp_path):
 
 @pytest.mark.parametrize("instance_id", ["", " ", "   "])
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_blank_explicit_instance_id_is_rejected_before_uuid(
-    tmp_path, capsys, monkeypatch, instance_id, dry_run
-):
+def test_blank_explicit_instance_id_is_rejected_before_uuid(tmp_path, capsys, monkeypatch, instance_id, dry_run):
     monkeypatch.setattr(cli.uuid, "uuid4", lambda: pytest.fail("UUID must not be generated"))
     arguments = ["--instance-id", instance_id, "--role", "operator",
                  "--created-at", "2026-08-14T10:00:00Z"]
@@ -820,9 +797,7 @@ def test_blank_timestamp_counts_as_missing_for_new_dry_run(tmp_path, capsys, mon
     ("--created-at", " ", "invalid_timestamp"),
 ])
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_blank_explicit_values_are_rejected_on_existing_workspace(
-    tmp_path, capsys, monkeypatch, option, value, error_code, dry_run
-):
+def test_blank_explicit_values_are_rejected_on_existing_workspace(tmp_path, capsys, monkeypatch, option, value, error_code, dry_run):
     invoke(capsys, *init_args(
         tmp_path, "--instance-id", "agent-1", "--role", "operator",
         "--created-at", "2026-08-14T10:00:00Z",

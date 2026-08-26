@@ -11,6 +11,7 @@ from typing import Any
 import jsonschema
 
 from .filesystem import WINDOWS_RESERVED_NAMES
+from .identifiers import colon_message_if_present, SUBMITTED_IDENTIFIER_PATTERN
 from .schema_validation import draft202012_validator, load_packaged_schema
 from .strict_json import InvalidStrictJSONError, validate_strict_json
 
@@ -18,7 +19,7 @@ from .strict_json import InvalidStrictJSONError, validate_strict_json
 SUBMIT_PROTOCOL = "aef.record.submit/v1"
 RECORD_PROTOCOL = "aef.record/v1"
 DIGEST_PREFIX = "sha256:"
-RECORD_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+RECORD_ID_PATTERN = SUBMITTED_IDENTIFIER_PATTERN
 RECORDED_AT_PATTERN = re.compile(
     r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?Z$"
 )
@@ -58,6 +59,9 @@ def _reject_persisted(code: str, message: str) -> None:
 
 def validate_record_id(record_id: Any) -> str:
     """Reject a non-canonical filesystem-safe record_id without cleaning it."""
+    colon_message = colon_message_if_present(record_id)
+    if colon_message is not None:
+        _reject_submission("invalid_record_id", colon_message)
     if not isinstance(record_id, str) or not RECORD_ID_PATTERN.fullmatch(record_id):
         _reject_submission("invalid_record_id", "record_id is not a canonical filesystem-safe identifier.")
     if ".." in record_id:
