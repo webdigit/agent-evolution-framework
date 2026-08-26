@@ -27,6 +27,16 @@ def derive_hypothesis(observations, hypotheses, *, pattern_key, minimum_observat
         "confirmations": 0,
         "explicit_human_validation": False,
     }
+    existing = next((h for h in hypotheses if h.get("id") == record["id"]), None)
+    if existing:
+        record["confirmations"] = existing.get("confirmations", 0)
+        record["explicit_human_validation"] = existing.get(
+            "explicit_human_validation", False,
+        )
+        if existing.get("confirmation_source_records"):
+            record["confirmation_source_records"] = deepcopy(
+                existing["confirmation_source_records"],
+            )
     status, out = upsert_by_id(hypotheses, record)
     return status, out, record["id"]
 

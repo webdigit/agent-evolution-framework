@@ -352,6 +352,19 @@ def merge_existing_source_records(
                         old.get("evidence_ids"),
                         next_item.get("evidence_ids"),
                     )
+                if collection == "hypotheses" and old:
+                    if "confirmations" in old:
+                        next_item["confirmations"] = old["confirmations"]
+                    if "explicit_human_validation" in old:
+                        next_item["explicit_human_validation"] = old[
+                            "explicit_human_validation"
+                        ]
+                    prior_confirmations = old.get("confirmation_source_records") or []
+                    next_confirmations = next_item.get("confirmation_source_records") or []
+                    if prior_confirmations or next_confirmations:
+                        next_item["confirmation_source_records"] = _unique_sources(
+                            list(prior_confirmations) + list(next_confirmations)
+                        )
             updated.append(next_item)
         out[collection] = updated
     return out

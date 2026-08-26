@@ -93,7 +93,7 @@ from .competency_declaration import (
 )
 from .competency_declaration_ops import plan_declare, recover_declaration
 from .competency_declaration_transaction import InvalidCompetencyDeclarationTransactionError
-from .ingest_ops import plan_ingest
+from .ingest_ops import INGEST_CONFIRMATION_ANNOUNCEMENT, INGEST_DERIVED_ANNOUNCEMENT, plan_ingest
 from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
 from .workspace_resolution import (
     apply_workspace_resolution_to_args,
@@ -1057,7 +1057,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="ingest declared learning events from persisted records",
         description=(
             "Cite persisted records and declare normalized learning events. "
-            "Derives learning signals, observations, and candidate hypotheses only. "
+            f"{INGEST_DERIVED_ANNOUNCEMENT} "
+            f"{INGEST_CONFIRMATION_ANNOUNCEMENT} "
             "Does not grant authority, create XP, or write records."
         ),
     )
