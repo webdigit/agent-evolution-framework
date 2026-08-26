@@ -148,7 +148,7 @@ def test_replay_same_record_is_no_change(tmp_path, capsys):
     ).read_bytes() == knowledge_before
 
 
-def test_three_distinct_intakes_reach_three_confirmations_without_rules(tmp_path, capsys):
+def test_three_distinct_intakes_reach_three_confirmations_and_derive_rule(tmp_path, capsys):
     init_workspace(tmp_path, capsys)
     code1, env1, _ = _ingest_human_correction(
         tmp_path, capsys,
@@ -164,7 +164,7 @@ def test_three_distinct_intakes_reach_three_confirmations_without_rules(tmp_path
         (tmp_path / ".agent/knowledge/knowledge.json").read_text(encoding="utf-8"),
     )
     assert _hypothesis(knowledge)["confirmations"] == 1
-    assert knowledge["rules"] == []
+    assert len(knowledge["rules"]) == 0
 
     code2, env2, _ = _ingest_human_correction(
         tmp_path, capsys, record_id="session-two", event_id="hc-two",
@@ -185,7 +185,9 @@ def test_three_distinct_intakes_reach_three_confirmations_without_rules(tmp_path
     hypothesis = _hypothesis(knowledge)
     assert hypothesis["confirmations"] == 3
     assert hypothesis["explicit_human_validation"] is False
-    assert knowledge["rules"] == []
+    assert len(knowledge["rules"]) == 1
+    assert knowledge["rules"][0]["id"] == f"rule:{PATTERN}"
+    assert env3["result"]["rules_derived"] == [f"rule:{PATTERN}"]
     assert len(hypothesis.get("confirmation_source_records") or []) == 3
 
 

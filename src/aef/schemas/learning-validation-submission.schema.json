@@ -2,19 +2,27 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/aef/learning-validation-submission.schema.json",
   "title": "AEF Learning Validation Submission",
-  "description": "Human-approved validation of candidate hypotheses. Does not increment confirmation counts or invoke EVALUATE.",
+  "description": "Human-approved validation of candidate hypotheses and/or promotion of active rules to principles. Does not increment confirmation counts or invoke EVALUATE.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "hypotheses", "decision"],
+  "required": ["protocol", "decision"],
   "properties": {
     "protocol": {"const": "aef.learning.validate.submit/v1"},
     "hypotheses": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "string",
         "minLength": 1,
         "pattern": "^hypothesis:[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+      },
+      "uniqueItems": true
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^rule:[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
       },
       "uniqueItems": true
     },
@@ -24,6 +32,16 @@
     },
     "decision": {"$ref": "#/$defs/humanDecision"}
   },
+  "anyOf": [
+    {
+      "properties": {"hypotheses": {"minItems": 1}},
+      "required": ["hypotheses"]
+    },
+    {
+      "properties": {"rules": {"minItems": 1}},
+      "required": ["rules"]
+    }
+  ],
   "$defs": {
     "citation": {
       "type": "object",

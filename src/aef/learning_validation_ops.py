@@ -157,7 +157,7 @@ def plan_validate(
             persisted = _load_persisted_records(root, current, record_ids)
             bind_validation_records(validation, persisted)
 
-        status, next_state, validated = resolve_validation_outcome(validation, knowledge)
+        status, next_state, validation_report = resolve_validation_outcome(validation, knowledge)
         try:
             validate_persisted_knowledge(next_state)
         except Exception as exc:
@@ -172,7 +172,10 @@ def plan_validate(
         overall = "NO_CHANGE" if next_state == knowledge else status
         result = {
             "hypotheses": validation.get("hypotheses") or [],
-            "validated": validated,
+            "rules": validation.get("rules") or [],
+            "hypotheses_validated": validation_report["hypotheses_validated"],
+            "rules_derived": validation_report["rules_derived"],
+            "principles_derived": validation_report["principles_derived"],
             "knowledge_path": KNOWLEDGE_PATH,
             "human_action_required": False,
         }

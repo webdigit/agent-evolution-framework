@@ -73,14 +73,15 @@ def test_validation_sets_explicit_flag_without_incrementing_confirmations(tmp_pa
     assert code == 0
     assert envelope["command"] == "LEARNING_VALIDATE"
     assert envelope["status"] == "CHANGE"
-    assert envelope["result"]["validated"] == [HYPOTHESIS_ID]
+    assert envelope["result"]["hypotheses_validated"] == [HYPOTHESIS_ID]
+    assert envelope["result"]["rules_derived"] == [f"rule:{PATTERN}"]
     knowledge = json.loads(
         (tmp_path / ".agent/knowledge/knowledge.json").read_text(encoding="utf-8"),
     )
     hypothesis = next(item for item in knowledge["hypotheses"] if item["id"] == HYPOTHESIS_ID)
     assert hypothesis["explicit_human_validation"] is True
     assert hypothesis["confirmations"] == 0
-    assert knowledge["rules"] == []
+    assert len(knowledge["rules"]) == 1
 
 
 def test_validation_without_human_decision_is_error(tmp_path, capsys):
@@ -218,4 +219,4 @@ def test_ingest_then_validate_does_not_double_count_confirmations(tmp_path, caps
     hypothesis = next(item for item in knowledge["hypotheses"] if item["id"] == HYPOTHESIS_ID)
     assert hypothesis["explicit_human_validation"] is True
     assert hypothesis["confirmations"] == 1
-    assert knowledge["rules"] == []
+    assert len(knowledge["rules"]) == 1

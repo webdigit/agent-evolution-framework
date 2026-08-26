@@ -160,10 +160,12 @@ aef --json learning validate --validation FILE [--dry-run]
 ```
 
 Apply explicit human validation to one or more **candidate** hypotheses cited
-by derived id (`hypothesis:…`). AEF sets `explicit_human_validation: true` on
-cited hypotheses without changing `confirmations`, unlocking rule derivation
-when the hypothesis gate opens. It does not ingest events, promote competencies,
-derive rules or principles directly, or invoke EVALUATE.
+by derived id (`hypothesis:…`), and/or promote **active** rules to principles
+by citing derived `rule:…` ids. AEF sets `explicit_human_validation: true` on
+hypotheses (without changing `confirmations`), derives rules when the hypothesis
+gate opens, and derives principles only when `rules` are cited with a human
+`decision` block. It does not ingest events, promote competencies, or invoke
+EVALUATE.
 
 `--json` is global and must precede the command. `--dry-run` projects the exact
 knowledge change without writing. Replaying the same validation returns

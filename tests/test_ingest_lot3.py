@@ -17,6 +17,7 @@ from aef.ingest_ops import (
     INGEST_CONFIRMATION_ANNOUNCEMENT,
     INGEST_DERIVED_ANNOUNCEMENT,
     INGEST_DERIVED_PREFIXES,
+    INGEST_RULE_DERIVATION_ANNOUNCEMENT,
 )
 from aef.ingest_intake import InvalidIngestSubmissionError, validate_ingest_submission
 from aef.record_document import build_persisted_record
@@ -219,3 +220,4 @@ def test_ingest_derived_prefixes_must_be_announced_in_cli():
     ingest_parser = ingest.choices["ingest"]
     assert INGEST_DERIVED_ANNOUNCEMENT in (ingest_parser.description or "")
     assert INGEST_CONFIRMATION_ANNOUNCEMENT in (ingest_parser.description or "")
+    assert INGEST_RULE_DERIVATION_ANNOUNCEMENT in (ingest_parser.description or "")

@@ -180,8 +180,10 @@ above). Unknown fields are rejected.
 Duplicate keys are rejected at every object depth.
 
 INGEST derives learning signals, observations, and candidate hypotheses only.
-It does not create XP, rules, or competencies, and it is not a runtime `doctor`
-install.
+When a hypothesis gate opens (`confirmations >= 3` or prior explicit human
+validation), INGEST also derives an active rule automatically and announces
+`rules_derived` in the envelope. It does not create principles, XP, or
+competencies, and it is not a runtime `doctor` install.
 
 ## COMPETENCY declaration
 
@@ -233,9 +235,18 @@ non-empty `actor`, RFC 3339 `decided_at`, and `approved: true`. Optional
 `records` cite persisted `record_id` + matching `digest` for audit context.
 
 The command sets `explicit_human_validation: true` on cited candidate hypotheses
-so rule derivation can proceed when the hypothesis gate opens. It does **not**
-increment `confirmations`, invoke EVALUATE, or ingest events. Do not edit
+and may derive active rules when the hypothesis gate opens. Cite `rules` with the
+same human `decision` block to promote active rules to principles. It does
+**not** increment `confirmations`, invoke EVALUATE, or ingest events. Do not edit
 `.agent/knowledge/knowledge.json` by hand.
+
+To promote a derived rule to a principle after it exists in `rules[]`, use
+[learning-principle-validation.json](examples/learning-principle-validation.json):
+
+```console
+aef learning validate --validation docs/examples/learning-principle-validation.json --dry-run
+aef learning validate --validation docs/examples/learning-principle-validation.json
+```
 
 ## Refresh and recovery
 

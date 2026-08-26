@@ -8,6 +8,7 @@ from typing import Any
 
 import jsonschema
 
+from .learning_derivation import DerivationConflictError, apply_eligible_rule_derivations, apply_principle_derivations
 from .learning_lifecycle import confirm_hypothesis
 from .record_document import InvalidRecordSubmissionError, validate_record_id
 from .schema_validation import draft202012_validator, load_packaged_schema
@@ -16,6 +17,7 @@ from .strict_json import InvalidStrictJSONError, validate_strict_json
 
 VALIDATION_PROTOCOL = "aef.learning.validate.submit/v1"
 HYPOTHESIS_PREFIX = "hypothesis:"
+RULE_PREFIX = "rule:"
 
 
 class InvalidLearningValidationError(ValueError):
@@ -55,6 +57,22 @@ def _validate_rfc3339(value: Any) -> str:
         ) from exc
     if timestamp.year > 2100:
         _reject("invalid_human_decision", "decided_at is outside the accepted time bound.")
+    return value
+
+
+def validate_cited_rule_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.startswith(RULE_PREFIX):
+        _reject(
+            "invalid_rule_id",
+            "each rule must be a derived rule id (rule:…).",
+        )
+    suffix = value.removeprefix(RULE_PREFIX)
+    if not suffix:
+        _reject("invalid_rule_id", "rule id suffix must be non-empty.")
+    try:
+        validate_record_id(suffix)
+    except InvalidRecordSubmissionError as exc:
+        raise InvalidLearningValidationError(exc.code, str(exc)) from exc
     return value
 
 
@@ -116,10 +134,19 @@ def validate_learning_validation(document: Any) -> dict[str, Any]:
         seen_hypotheses.add(hypothesis_id)
         hypothesis_ids.append(hypothesis_id)
 
-    if not hypothesis_ids:
+    rule_ids: list[str] = []
+    seen_rules: set[str] = set()
+    for raw_id in document.get("rules") or []:
+        rule_id = validate_cited_rule_id(raw_id)
+        if rule_id in seen_rules:
+            _reject("duplicate_rule_id", "each rule id may appear only once.")
+        seen_rules.add(rule_id)
+        rule_ids.append(rule_id)
+
+    if not hypothesis_ids and not rule_ids:
         _reject(
             "invalid_validation_targets",
-            "at least one hypothesis id must be cited.",
+            "at least one hypothesis or rule id must be cited.",
         )
 
     record_ids: set[str] = set()
@@ -142,6 +169,7 @@ def validate_learning_validation(document: Any) -> dict[str, Any]:
 
     out = deepcopy(document)
     out["hypotheses"] = hypothesis_ids
+    out["rules"] = rule_ids
     return out
 
 
@@ -200,43 +228,99 @@ def _rule_promoted(hypothesis_id: str, rules: list[Any]) -> bool:
 def resolve_validation_outcome(
     validation: dict[str, Any],
     knowledge: dict[str, Any],
-) -> tuple[str, dict[str, Any], list[str]]:
-    """Apply explicit human validation to cited candidate hypotheses."""
+) -> tuple[str, dict[str, Any], dict[str, list[str]]]:
+    """Apply human validation to hypotheses and/or derive principles from rules."""
     next_knowledge = deepcopy(knowledge)
-    validated: list[str] = []
+    report: dict[str, list[str]] = {
+        "hypotheses_validated": [],
+        "rules_derived": [],
+        "principles_derived": [],
+    }
     changed = False
 
-    hypotheses = deepcopy(next_knowledge.get("hypotheses") or [])
-    rules = next_knowledge.get("rules") or []
-    by_id = _hypothesis_index(next_knowledge)
+    if validation.get("hypotheses"):
+        hypotheses = deepcopy(next_knowledge.get("hypotheses") or [])
+        rules = next_knowledge.get("rules") or []
+        by_id = _hypothesis_index(next_knowledge)
 
-    for hypothesis_id in validation["hypotheses"]:
-        hypothesis = by_id.get(hypothesis_id)
-        if hypothesis is None:
-            _reject(
-                "hypothesis_not_found",
-                f"hypothesis {hypothesis_id} is not present in knowledge.",
+        for hypothesis_id in validation["hypotheses"]:
+            hypothesis = by_id.get(hypothesis_id)
+            if hypothesis is None:
+                _reject(
+                    "hypothesis_not_found",
+                    f"hypothesis {hypothesis_id} is not present in knowledge.",
+                )
+            if hypothesis.get("status") != "candidate":
+                _reject(
+                    "hypothesis_not_candidate",
+                    f"hypothesis {hypothesis_id} is not a candidate hypothesis.",
+                )
+            if _rule_promoted(hypothesis_id, rules):
+                if hypothesis.get("explicit_human_validation"):
+                    continue
+                _reject(
+                    "hypothesis_already_promoted",
+                    f"hypothesis {hypothesis_id} is already promoted to a rule.",
+                )
+            status, hypotheses = confirm_hypothesis(
+                hypotheses,
+                hypothesis_id,
+                explicit_human_validation=True,
             )
-        if hypothesis.get("status") != "candidate":
-            _reject(
-                "hypothesis_not_candidate",
-                f"hypothesis {hypothesis_id} is not a candidate hypothesis.",
+            if status == "CHANGE":
+                changed = True
+                report["hypotheses_validated"].append(hypothesis_id)
+
+        next_knowledge["hypotheses"] = hypotheses
+        try:
+            derive_status, next_knowledge, rules_derived = apply_eligible_rule_derivations(
+                next_knowledge,
             )
-        if _rule_promoted(hypothesis_id, rules):
-            if hypothesis.get("explicit_human_validation"):
-                continue
-            _reject(
-                "hypothesis_already_promoted",
-                f"hypothesis {hypothesis_id} is already promoted to a rule.",
-            )
-        status, hypotheses = confirm_hypothesis(
-            hypotheses,
-            hypothesis_id,
-            explicit_human_validation=True,
-        )
-        if status == "CHANGE":
+        except DerivationConflictError as exc:
+            raise LearningValidationBlockedError(exc.code, str(exc), exc.details) from exc
+        if derive_status == "CHANGE":
             changed = True
-            validated.append(hypothesis_id)
+            report["rules_derived"].extend(rules_derived)
 
-    next_knowledge["hypotheses"] = hypotheses
-    return ("CHANGE" if changed else "NO_CHANGE"), next_knowledge, validated
+    if validation.get("rules"):
+        rules = next_knowledge.get("rules") or []
+        by_rule_id = {
+            item["id"]: item
+            for item in rules
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        for rule_id in validation["rules"]:
+            rule = by_rule_id.get(rule_id)
+            if rule is None:
+                _reject(
+                    "rule_not_found",
+                    f"rule {rule_id} is not present in knowledge.",
+                )
+            if rule.get("status") != "active":
+                _reject(
+                    "rule_not_active",
+                    f"rule {rule_id} is not an active rule.",
+                )
+            existing_principle = next(
+                (
+                    item for item in next_knowledge.get("principles") or []
+                    if isinstance(item, dict)
+                    and item.get("derived_from") == rule_id
+                    and item.get("id") == f"principle:{rule_id.removeprefix(RULE_PREFIX)}"
+                ),
+                None,
+            )
+            if existing_principle is not None:
+                continue
+        try:
+            principle_status, next_knowledge, principles_derived = apply_principle_derivations(
+                next_knowledge,
+                validation["rules"],
+            )
+        except DerivationConflictError as exc:
+            raise LearningValidationBlockedError(exc.code, str(exc), exc.details) from exc
+        if principle_status == "CHANGE":
+            changed = True
+            report["principles_derived"].extend(principles_derived)
+
+    return ("CHANGE" if changed else "NO_CHANGE"), next_knowledge, report

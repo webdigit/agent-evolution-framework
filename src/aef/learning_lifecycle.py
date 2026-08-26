@@ -71,6 +71,11 @@ def derive_rule(hypotheses, rules, *, hypothesis_id, minimum_confirmations=3):
         "confirmations": h.get("confirmations", 0),
         "explicit_human_validation": h.get("explicit_human_validation", False),
     }
+    existing = next((x for x in rules if x.get("id") == record["id"]), None)
+    if existing is not None:
+        if existing == record:
+            return "NO_CHANGE", deepcopy(rules), record["id"]
+        return "RULE_CONFLICT", deepcopy(rules), None
     status, out = upsert_by_id(rules, record)
     return status, out, record["id"]
 
@@ -81,6 +86,8 @@ def derive_principle(rules, principles, *, rule_id, human_approved=False):
     r = next((x for x in rules if x.get("id") == rule_id), None)
     if r is None:
         return "NOT_FOUND", deepcopy(principles), None
+    if r.get("status") not in {None, "active"}:
+        return "NOT_FOUND", deepcopy(principles), None
     record = {
         "id": f"principle:{rule_id.removeprefix('rule:')}",
         "type": "principle",
@@ -88,5 +95,10 @@ def derive_principle(rules, principles, *, rule_id, human_approved=False):
         "derived_from": rule_id,
         "human_approved": True,
     }
+    existing = next((x for x in principles if x.get("id") == record["id"]), None)
+    if existing is not None:
+        if existing == record:
+            return "NO_CHANGE", deepcopy(principles), record["id"]
+        return "PRINCIPLE_CONFLICT", deepcopy(principles), None
     status, out = upsert_by_id(principles, record)
     return status, out, record["id"]

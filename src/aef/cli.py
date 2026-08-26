@@ -98,6 +98,7 @@ from .competency_declaration_transaction import InvalidCompetencyDeclarationTran
 from .ingest_ops import (
     INGEST_CONFIRMATION_ANNOUNCEMENT,
     INGEST_DERIVED_ANNOUNCEMENT,
+    INGEST_RULE_DERIVATION_ANNOUNCEMENT,
     plan_ingest,
 )
 from .strict_json import DuplicateJSONKeyError, reject_duplicate_keys
@@ -868,9 +869,22 @@ def _render_human(envelope: dict[str, Any]) -> str:
             cited_hypotheses = _escape_human_value(
                 ", ".join(str(item) for item in hypotheses) if hypotheses else "none"
             )
-            validated = result.get("validated") or []
-            applied = _escape_human_value(
+            cited_rules = result.get("rules") or []
+            rules_cited = _escape_human_value(
+                ", ".join(str(item) for item in cited_rules) if cited_rules else "none"
+            )
+            validated = result.get("hypotheses_validated") or []
+            applied_hypotheses = _escape_human_value(
                 ", ".join(str(item) for item in validated) if validated else "none"
+            )
+            rules_derived = result.get("rules_derived") or []
+            applied_rules = _escape_human_value(
+                ", ".join(str(item) for item in rules_derived) if rules_derived else "none"
+            )
+            principles_derived = result.get("principles_derived") or []
+            applied_principles = _escape_human_value(
+                ", ".join(str(item) for item in principles_derived)
+                if principles_derived else "none"
             )
             if status == "CHANGE":
                 heading = (
@@ -881,13 +895,17 @@ def _render_human(envelope: dict[str, Any]) -> str:
                 return (
                     f"[OK] {heading}\n\n"
                     f"Hypotheses: {cited_hypotheses}\n"
-                    f"Validated : {applied}\n"
+                    f"Rules     : {rules_cited}\n"
+                    f"Validated : {applied_hypotheses}\n"
+                    f"Derived   : {applied_rules}\n"
+                    f"Principles: {applied_principles}\n"
                     f"Workspace : {workspace}{workspace_suffix}\n"
                 )
             if status == "NO_CHANGE":
                 return (
                     "[OK] AEF learning validation is unchanged\n\n"
                     f"Hypotheses: {cited_hypotheses}\n"
+                    f"Rules     : {rules_cited}\n"
                     f"Workspace : {workspace}{workspace_suffix}\n"
                     "Changes   : none\n"
                 )
@@ -1103,6 +1121,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Cite persisted records and declare normalized learning events. "
             f"{INGEST_DERIVED_ANNOUNCEMENT} "
             f"{INGEST_CONFIRMATION_ANNOUNCEMENT} "
+            f"{INGEST_RULE_DERIVATION_ANNOUNCEMENT} "
             "Does not grant authority, create XP, or write records."
         ),
     )
