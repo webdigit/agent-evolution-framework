@@ -1,0 +1,21 @@
+# Team override for bmad-build.
+# Sparse: only the overreach-hunter layer. Existing review layers inherit from
+# the skill customize.toml (merge by id — new id appends).
+
+[workflow]
+
+[[workflow.review_layers]]
+id = "overreach-hunter"
+name = "Overreach Hunter"
+instruction = """
+Launch a context-free subagent with this prompt:
+
+Read `{project-root}/_bmad/custom/bmad-build-overreach-hunter.md` completely and follow it as your review instructions.
+
+Review content:
+
+{diff_output}
+
+Do not invoke any skill. If the instruction file is unreadable, report that exact failure and stop. Return only the review result.
+
+"""

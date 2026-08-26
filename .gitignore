@@ -57,7 +57,13 @@ Desktop.ini
 pilot-workspace/
 pilot-workspace-*/
 
-# Local BMAD Method install and generated artifacts
-_bmad/
+# Local BMAD Method install and generated artifacts.
+# Team customization under _bmad/custom/ is versioned (BMAD canon); personal
+# *.user.toml stays ignored. Render, config install outputs, and other _bmad/
+# trees remain local-only.
+_bmad/*
+!_bmad/custom/
+!_bmad/custom/**
+_bmad/custom/*.user.toml
 _bmad-output/
 .agents/skills/bmad-*/
