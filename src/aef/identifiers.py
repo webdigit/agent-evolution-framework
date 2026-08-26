@@ -1,13 +1,40 @@
 import hashlib
+import re
 import unicodedata
+from typing import Any
 
 
 _FORBIDDEN_ID_CATEGORIES = {"Cc", "Cf", "Zs", "Zl", "Zp"}
 _MAX_COMPETENCY_ID_LENGTH = 128
 
+SUBMITTED_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+
+# Top-level namespaces reserved for identifiers derived by the learning engine.
+DERIVED_IDENTIFIER_PREFIXES = frozenset(
+    {
+        "signal:",
+        "observation:",
+        "hypothesis:",
+        "rule:",
+        "principle:",
+        "promotion:",
+        "transfer:",
+    }
+)
+
+COLON_IN_SUBMITTED_IDENTIFIER_MESSAGE = (
+    "The ':' separator is reserved for identifiers derived by AEF; use '.' or '-' instead."
+)
+
 
 class InvalidCompetencyIdentifierError(ValueError):
     """Raised when a competency identifier is not canonical."""
+
+
+def colon_message_if_present(value: Any) -> str | None:
+    if isinstance(value, str) and ":" in value:
+        return COLON_IN_SUBMITTED_IDENTIFIER_MESSAGE
+    return None
 
 
 def _latin_cyrillic_mix(value: str) -> bool:
@@ -45,6 +72,14 @@ def validate_competency_id(value):
             "invalid competency identifier; explicit migration required"
         )
     return value
+
+
+def validate_submitted_competency_id(value):
+    """Reject competency identifiers submitted through COMPETENCY declare."""
+    colon_message = colon_message_if_present(value)
+    if colon_message is not None:
+        raise InvalidCompetencyIdentifierError(colon_message)
+    return validate_competency_id(value)
 
 
 def competency_recommendation_subject(value):

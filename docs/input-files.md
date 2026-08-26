@@ -4,6 +4,30 @@ AEF modifying commands consume explicit strict JSON. Object keys must be text,
 numbers must be finite, and duplicate identities or unknown fields in closed
 structures are rejected. Validate a plan with `--dry-run` before applying it.
 
+## Submitted identifiers
+
+The `:` separator is reserved for identifiers **derived by AEF** in persisted
+state (`signal:…`, `observation:…`, `hypothesis:…`, `rule:…`, `principle:…`,
+`promotion:…`, `transfer:…`). Do not imitate those prefixes when you submit
+`record_id`, event `id`, `pattern_key`, `competency`, or `competency_id`.
+Identifiers you submit use `.` or `-` instead of `:`.
+
+This reservation applies to **submitted** identifiers. Engine-side validation
+of existing competency ids still accepts `:`, so a brownfield workspace may
+already hold legacy identifiers with `:` that collide with a derived namespace;
+that migration is out of scope here.
+
+Submitted identifiers match:
+
+```text
+^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$
+```
+
+A colon in a submitted identifier is rejected with an explicit message, not a
+silent schema mismatch. Renaming an intake such as
+`email.support-client.reponse:echeance-annoncee` to use `.` or `-` is the
+correct fix.
+
 ## DISCOVER connector snapshot
 
 Use [connectors.json](examples/connectors.json):
@@ -113,7 +137,7 @@ aef record --recording docs/examples/recording.json
 ```
 
 The closed root uses protocol `aef.record.submit/v1`. It requires a
-filesystem-safe `record_id`, a canonical RFC 3339 UTC `recorded_at` ending with
+filesystem-safe `record_id` (see **Submitted identifiers** above), a canonical RFC 3339 UTC `recorded_at` ending with
 `Z`, a `declared_by` object (`kind` is `human` or `agent`, plus a non-empty
 `identifier`), and a `payload` with `context` plus the four collections
 `actions`, `outcomes`, `incidents`, and `evidence`. At least one collection
@@ -151,7 +175,8 @@ a `kind` from `payload.incidents`.
 Each event requires an `id` and either `novel` set to `true` or a `kind` of
 `help_request`, `human_correction`, `rule_mismatch`, or `success`.
 `rule_mismatch` requires `rule_id`. `success` requires `explained`.
-`pattern_key` and `competency` are optional. Unknown fields are rejected.
+`pattern_key` and `competency` are optional submitted identifiers (same rules as
+above). Unknown fields are rejected.
 Duplicate keys are rejected at every object depth.
 
 INGEST derives learning signals, observations, and candidate hypotheses only.
@@ -171,7 +196,7 @@ aef competency declare --declaration docs/examples/competency-declaration.json
 ```
 
 The closed root uses protocol `aef.competency.declare.submit/v1`. It requires a
-`competency_id`, `title`, `scope`, `limits`, `rationale`, at least one record
+submitted `competency_id` (see **Submitted identifiers** above), `title`, `scope`, `limits`, `rationale`, at least one record
 citation (`record_id` + persisted `digest`), and a human `decision` with
 `source: "human"`, non-empty `actor`, RFC 3339 `decided_at`, and
 `approved: true`. Unknown fields are rejected. Level, XP, Trust, and permission
