@@ -2,7 +2,7 @@
 # Epic 3: zip-bomb wheel, repo binary exec, network. Exit 0 iff properties hold.
 set -euo pipefail
 : "${AEF_BUILD:?set AEF_BUILD to the tree under test}"
-AEF="$AEF_BUILD/.venv/bin/aef"
+PY="$AEF_BUILD/.venv/bin/python"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$(mktemp -d)"; trap 'rm -rf "$WS"' EXIT
 mkdir -p "$WS/.agent" "$WS/dist" "$WS/.aef-venv/bin"
@@ -14,11 +14,11 @@ fail=0
 python3 "$HERE/fabrique-roue-piegee.py" "$WS/dist/jsonschema-4.0.0-py3-none-any.whl"
 echo "--- roue piegee (attendu : enveloppe rendue, RSS de l'ordre de 25 Mio, moins d'une seconde)"
 set +e
-/usr/bin/env python3 - "$AEF" "$WS" <<'PY'
+/usr/bin/env python3 - "$PY" "$WS" <<'PY'
 import resource, subprocess, sys, time
-aef, ws = sys.argv[1], sys.argv[2]
+py, ws = sys.argv[1], sys.argv[2]
 t0 = time.time()
-p = subprocess.run([aef, "--workspace", ws, "--json", "doctor"], capture_output=True, text=True, timeout=300)
+p = subprocess.run([py, "-m", "aef", "--workspace", ws, "--json", "doctor"], capture_output=True, text=True, timeout=300)
 rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024.0
 wall = time.time() - t0
 print("    exit=%s  wall=%.2fs  RSS max=%.1f MiB" % (p.returncode, wall, rss))

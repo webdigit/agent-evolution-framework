@@ -6,7 +6,6 @@ import sys
 
 import pytest
 
-from conftest import installed_aef_script
 import jsonschema
 
 import aef.cli as cli
@@ -140,9 +139,7 @@ def test_exact_historical_lifecycle_event_matches_runtime_and_schema(status, eve
         id="nested-unknown",
     ),
 ])
-def test_historical_lifecycle_event_rejects_every_noncanonical_property(
-    status, event_name, mutation
-):
+def test_historical_lifecycle_event_rejects_every_noncanonical_property(status, event_name, mutation):
     knowledge = _historical_knowledge(status, event_name)
     event = knowledge["rules"][0]["lifecycle"][event_name]
     mutation(event)
@@ -853,19 +850,17 @@ def test_invalid_persisted_review_trace_is_rejected_without_mutation():
     assert project == before
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_consolidate_subprocess_modes_and_launchers(tmp_path, launcher, mode):
-    workspace = tmp_path / f"workspace-{launcher}-{mode}"
+def test_consolidate_subprocess_modes_and_launchers(tmp_path, mode):
+    workspace = tmp_path / f"workspace-{mode}"
     apply_workspace(workspace, load_workspace(workspace), _project())
-    reviews = tmp_path / f"reviews-{launcher}-{mode}.json"
+    reviews = tmp_path / f"reviews-{mode}.json"
     reviews.write_text(
         json.dumps({"protocol": "aef.consolidate/v1", "reviews": [_specialize_review()]}),
         encoding="utf-8",
     )
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(

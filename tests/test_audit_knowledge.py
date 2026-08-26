@@ -7,7 +7,6 @@ import sys
 import jsonschema
 import pytest
 
-from conftest import installed_aef_script
 
 from aef import cli as aef_cli
 from aef.filesystem import apply_workspace, load_workspace
@@ -142,18 +141,16 @@ def test_official_schema_path_rejects_schema_invalid_document():
         validate_persisted_knowledge(_invalid_root_extension())
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_audit_invalid_knowledge_subprocess_modes_are_read_only(tmp_path, launcher, mode):
-    workspace = tmp_path / f"audit knowledge 日本 {launcher} {mode}"
+def test_audit_invalid_knowledge_subprocess_modes_are_read_only(tmp_path, mode):
+    workspace = tmp_path / f"audit knowledge 日本 {mode}"
     project = _initialized_project()
     project["files"][KNOWLEDGE_PATH] = _invalid_root_extension()
     apply_workspace(workspace, load_workspace(workspace), project)
     knowledge = workspace / KNOWLEDGE_PATH
     before = knowledge.read_bytes()
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(
@@ -183,10 +180,9 @@ def test_audit_invalid_knowledge_subprocess_modes_are_read_only(tmp_path, launch
             assert completed.stdout.count("\n") == 1
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_audit_missing_knowledge_subprocess_is_read_only(tmp_path, launcher, mode):
-    workspace = tmp_path / f"missing knowledge {launcher} {mode}"
+def test_audit_missing_knowledge_subprocess_is_read_only(tmp_path, mode):
+    workspace = tmp_path / f"missing knowledge {mode}"
     apply_workspace(workspace, load_workspace(workspace), _initialized_project())
     knowledge = workspace / KNOWLEDGE_PATH
     knowledge.unlink()
@@ -195,8 +191,7 @@ def test_audit_missing_knowledge_subprocess_is_read_only(tmp_path, launcher, mod
         for path in workspace.rglob("*") if path.is_file()
     }
     python = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(python), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(python), "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(

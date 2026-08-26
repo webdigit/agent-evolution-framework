@@ -9,11 +9,6 @@ from aef.claude_integration import (
     CLAUDE_BRIDGE_BYTES, LEGACY_CLAUDE_BRIDGE_BYTES,
 )
 from aef.guidance_integration import AGENTS_BYTES, CLAUDE_ROOT_BYTES
-from conftest import installed_aef_script
-
-
-def launcher():
-    return installed_aef_script()
 
 
 def run_cli(workspace, *arguments):
@@ -22,7 +17,8 @@ def run_cli(workspace, *arguments):
     while arguments and arguments[0] in {"--json", "--human", "--compact"}:
         global_options.append(arguments.pop(0))
     return subprocess.run(
-        [str(launcher()), *global_options, "--workspace", str(workspace), *arguments],
+        [sys.executable, "-m", "aef", *global_options,
+         "--workspace", str(workspace), *arguments],
         capture_output=True, text=True, check=False,
     )
 
@@ -115,14 +111,9 @@ def test_human_install_uses_guidance_only_language(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["--human", "--json", "--compact"])
-@pytest.mark.parametrize("kind", ["script", "module"])
-def test_installed_and_module_launchers_support_every_output_mode(
-    tmp_path, mode, kind
-):
+def test_installed_and_module_launchers_support_every_output_mode(tmp_path, mode):
     root = initialized_workspace(tmp_path)
-    prefix = (
-        [sys.executable, "-m", "aef"] if kind == "module" else [str(launcher())]
-    )
+    prefix = [sys.executable, "-m", "aef"]
     completed = subprocess.run(
         [*prefix, mode, "--workspace", str(root), "integrate", "claude"],
         capture_output=True, text=True, check=False,
@@ -231,7 +222,8 @@ def test_unicode_workspace_is_safe_under_ascii_console_encoding(tmp_path):
     environment = dict(__import__("os").environ)
     environment["PYTHONIOENCODING"] = "ascii:strict"
     completed = subprocess.run(
-        [str(launcher()), "--human", "--workspace", str(root), "integrate", "claude"],
+        [sys.executable, "-m", "aef", "--human", "--workspace", str(root),
+         "integrate", "claude"],
         capture_output=True, check=False, env=environment,
     )
     text = completed.stdout.decode("ascii")
@@ -258,9 +250,7 @@ def test_status_preserves_both_unmanaged_settings_and_existing_hooks(tmp_path):
     assert {path: path.read_bytes() for path in before} == before
 
 
-def test_fsync_failure_returns_public_filesystem_error_without_success(
-    tmp_path, monkeypatch, capsys,
-):
+def test_fsync_failure_returns_public_filesystem_error_without_success(tmp_path, monkeypatch, capsys):
     import aef.guidance_filesystem as filesystem
     from aef.cli import main
 

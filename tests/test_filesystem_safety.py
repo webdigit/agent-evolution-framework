@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from conftest import installed_aef_script
 
 import aef.filesystem as filesystem
 from aef.filesystem import (
@@ -120,9 +119,7 @@ class _CustomJSONKey:
         pytest.param(_CustomJSONKey(), True, id="custom-nested"),
     ],
 )
-def test_non_text_json_key_is_type_error_before_first_write(
-    tmp_path: Path, invalid_key, nested
-):
+def test_non_text_json_key_is_type_error_before_first_write(tmp_path: Path, invalid_key, nested):
     invalid = {invalid_key: "not coerced"}
     document = {"nested": invalid} if nested else invalid
     desired = {
@@ -382,9 +379,7 @@ def test_atomic_update_preserves_unknown_agent_files(tmp_path: Path):
     ".agent/state/competencies.json",
     ".agent/state/evaluations.json",
 ])
-def test_disk_transaction_blocks_public_mutation_with_stale_current(
-    tmp_path: Path, target: str
-):
+def test_disk_transaction_blocks_public_mutation_with_stale_current(tmp_path: Path, target: str):
     stale = load_workspace(tmp_path)
     journal_state = load_workspace(tmp_path)
     journal_state["files"][EVALUATION_TRANSACTION_PATH] = {"present": True}
@@ -400,9 +395,7 @@ def test_disk_transaction_blocks_public_mutation_with_stale_current(
     assert not (tmp_path / target).exists()
 
 
-def test_current_transaction_blocks_public_mutation_when_disk_journal_is_absent(
-    tmp_path: Path,
-):
+def test_current_transaction_blocks_public_mutation_when_disk_journal_is_absent(tmp_path: Path):
     current = load_workspace(tmp_path)
     current["files"][EVALUATION_TRANSACTION_PATH] = {"present": True}
     desired = {"files": {
@@ -445,9 +438,7 @@ def test_transaction_guard_allows_strict_no_change_plan(tmp_path: Path):
 
 
 @pytest.mark.parametrize("entry_kind", ["empty", "invalid", "directory"])
-def test_reserved_transaction_entry_blocks_regardless_of_content_or_type(
-    tmp_path: Path, entry_kind: str
-):
+def test_reserved_transaction_entry_blocks_regardless_of_content_or_type(tmp_path: Path, entry_kind: str):
     reserved = tmp_path / EVALUATION_TRANSACTION_PATH
     reserved.parent.mkdir(parents=True)
     if entry_kind == "empty":
@@ -509,9 +500,7 @@ def test_reserved_transaction_junction_blocks(tmp_path: Path):
 
 
 @pytest.mark.parametrize("failure", [PermissionError("denied"), OSError("indeterminate")])
-def test_transaction_entry_inspection_errors_fail_closed(
-    monkeypatch, tmp_path: Path, failure: OSError
-):
+def test_transaction_entry_inspection_errors_fail_closed(monkeypatch, tmp_path: Path, failure: OSError):
     real_lstat = filesystem.os.lstat
 
     def fail_reserved(path):
@@ -531,9 +520,7 @@ def test_transaction_entry_inspection_errors_fail_closed(
     assert not (tmp_path / ".agent").exists()
 
 
-def test_transaction_entry_appearing_between_inspections_blocks_before_write(
-    monkeypatch, tmp_path: Path
-):
+def test_transaction_entry_appearing_between_inspections_blocks_before_write(monkeypatch, tmp_path: Path):
     calls = 0
     real_lstat = filesystem.os.lstat
 
@@ -558,9 +545,7 @@ def test_transaction_entry_appearing_between_inspections_blocks_before_write(
     assert not (tmp_path / ".agent").exists()
 
 
-def test_transaction_entry_disappearing_after_inspection_still_blocks(
-    monkeypatch, tmp_path: Path
-):
+def test_transaction_entry_disappearing_after_inspection_still_blocks(monkeypatch, tmp_path: Path):
     reserved = tmp_path / EVALUATION_TRANSACTION_PATH
     reserved.parent.mkdir(parents=True)
     reserved.write_text("{}", encoding="utf-8")
@@ -583,17 +568,13 @@ def test_transaction_entry_disappearing_after_inspection_still_blocks(
     assert not (tmp_path / ".agent/state/career.json").exists()
 
 
-@pytest.mark.parametrize("launcher", ["module", "script"])
 @pytest.mark.parametrize("mode", ["human", "json", "compact"])
-def test_fail_closed_transaction_entry_has_stable_cli_output(
-    tmp_path: Path, launcher: str, mode: str
-):
+def test_fail_closed_transaction_entry_has_stable_cli_output(tmp_path: Path, mode: str):
     reserved = tmp_path / EVALUATION_TRANSACTION_PATH
     reserved.parent.mkdir(parents=True)
     reserved.mkdir()
     executable = Path(sys.executable)
-    script = installed_aef_script()
-    prefix = [str(executable), "-m", "aef"] if launcher == "module" else [str(script)]
+    prefix = [str(executable), "-m", "aef"]
     option = "--human" if mode == "human" else f"--{mode}"
 
     completed = subprocess.run(

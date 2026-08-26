@@ -31,7 +31,7 @@ ROUNDS = 40
 
 def cli(ws, *args, timeout=120):
     result = subprocess.run(
-        [AEF, "--json", "--workspace", str(ws), *args],
+        [*AEF, "--json", "--workspace", str(ws), *args],
         capture_output=True, text=True, timeout=timeout,
     )
     try:

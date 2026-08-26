@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(ROOT / "src"))
 AEF=AEF
 def cli(ws,*a,timeout=120):
-    r=subprocess.run([AEF,"--json","--workspace",str(ws),*a],capture_output=True,text=True,timeout=timeout)
+    r=subprocess.run([*AEF,"--json","--workspace",str(ws),*a],capture_output=True,text=True,timeout=timeout)
     try:e=json.loads(r.stdout)
     except Exception:e={}
     return r.returncode,e.get("status"),(e.get("meta") or {}).get("reason")

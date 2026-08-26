@@ -41,14 +41,15 @@ ROOT = _resolve_root()
 _BIN = ROOT / (".venv/Scripts" if ON_WINDOWS else ".venv/bin")
 _EXE = ".exe" if ON_WINDOWS else ""
 
-AEF = str(_BIN / ("aef" + _EXE))
 PY = str(_BIN / ("python" + _EXE))
+# Module form only — never the console script (blocked by WDAC on some hosts).
+AEF = [PY, "-m", "aef"]
 
-if not Path(AEF).exists():
+if not Path(PY).exists():
     sys.stderr.write(
-        "Executable not found: %s\n"
+        "Interpreter not found: %s\n"
         "Run 00-setup.py first (SHA worktree or --current). It creates the "
-        "venv and proves this tree is the one that gets imported.\n" % AEF
+        "venv and proves this tree is the one that gets imported.\n" % PY
     )
     raise SystemExit(2)
 
