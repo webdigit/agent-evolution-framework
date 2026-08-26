@@ -180,8 +180,10 @@ above). Unknown fields are rejected.
 Duplicate keys are rejected at every object depth.
 
 INGEST derives learning signals, observations, and candidate hypotheses only.
-It does not create XP, rules, or competencies, and it is not a runtime `doctor`
-install.
+When a hypothesis gate opens (`confirmations >= 3` or prior explicit human
+validation), INGEST also derives an active rule automatically and announces
+`rules_derived` in the envelope. It does not create principles, XP, or
+competencies, and it is not a runtime `doctor` install.
 
 ## COMPETENCY declaration
 
@@ -211,6 +213,64 @@ Interrupted declarations leave a distinct recovery journal. Start recovery with:
 aef competency declare --recover --dry-run
 aef competency declare --recover
 ```
+
+## LEARNING validation
+
+Use [learning-validation.json](examples/learning-validation.json) after the cited
+hypothesis exists in `.agent/knowledge/knowledge.json`. The bundled example
+assumes [learning-ingest-hypothesis.json](examples/learning-ingest-hypothesis.json)
+was applied after [recording.json](examples/recording.json):
+
+```console
+aef record --recording docs/examples/recording.json
+aef ingest --intake docs/examples/learning-ingest-hypothesis.json
+aef learning validate --validation docs/examples/learning-validation.json --dry-run
+aef learning validate --validation docs/examples/learning-validation.json
+```
+
+The closed root uses protocol `aef.learning.validate.submit/v1`. It requires one
+or more derived hypothesis ids (`hypothesis:…`, produced by AEF — never submit
+`rule:` or `principle:` ids here) and a human `decision` with `source: "human"`,
+non-empty `actor`, RFC 3339 `decided_at`, and `approved: true`. Optional
+`records` cite persisted `record_id` + matching `digest` for audit context.
+
+The command sets `explicit_human_validation: true` on cited candidate hypotheses
+and may derive active rules when the hypothesis gate opens. Cite `rules` with the
+same human `decision` block to promote active rules to principles. It does
+**not** increment `confirmations`, invoke EVALUATE, or ingest events. Do not edit
+`.agent/knowledge/knowledge.json` by hand.
+
+To promote a derived rule to a principle after it exists in `rules[]`, use
+[learning-principle-validation.json](examples/learning-principle-validation.json):
+
+```console
+aef learning validate --validation docs/examples/learning-principle-validation.json --dry-run
+aef learning validate --validation docs/examples/learning-principle-validation.json
+```
+
+## LEARNED knowledge card
+
+After active rules or principles exist in `.agent/knowledge/knowledge.json`
+(see INGEST and LEARNING validation above), render the agent-readable card:
+
+```console
+aef integrate learning --dry-run
+aef integrate learning
+aef integrate learning --status
+```
+
+The command writes or refreshes `docs/knowledge.md` between managed
+`AEF:LEARNING` markers. It lists **active** operational rules and principles
+only, with provenance (`rule` vs `principle`, confirmations,
+`explicit_human_validation`) and an honesty line stating that entries come
+from **declared** ingest events, not verified facts. A workspace with no
+active rules still receives a card that states there are none — never an empty
+file and never a refusal.
+
+Divergence from persisted knowledge is **périmé** (stale), never catalog
+tampering. Regenerate with `aef integrate learning`. `AGENTS.md` cites
+`docs/knowledge.md` additively when you run `aef integrate agents` or
+`aef integrate all`.
 
 ## Refresh and recovery
 

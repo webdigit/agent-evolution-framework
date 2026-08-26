@@ -53,7 +53,7 @@ def _fixture_doctor(**overrides):
 
 def test_doors_for_integration_includes_runtime():
     assert doors_for_integration("all") == [
-        "agents", "claude", "gemini", "runtime",
+        "agents", "claude", "gemini", "runtime", "learning",
     ]
     assert doors_for_integration("runtime") == ["runtime"]
 

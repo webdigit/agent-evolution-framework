@@ -27,6 +27,16 @@ def derive_hypothesis(observations, hypotheses, *, pattern_key, minimum_observat
         "confirmations": 0,
         "explicit_human_validation": False,
     }
+    existing = next((h for h in hypotheses if h.get("id") == record["id"]), None)
+    if existing:
+        record["confirmations"] = existing.get("confirmations", 0)
+        record["explicit_human_validation"] = existing.get(
+            "explicit_human_validation", False,
+        )
+        if existing.get("confirmation_source_records"):
+            record["confirmation_source_records"] = deepcopy(
+                existing["confirmation_source_records"],
+            )
     status, out = upsert_by_id(hypotheses, record)
     return status, out, record["id"]
 
@@ -35,9 +45,12 @@ def confirm_hypothesis(hypotheses, hypothesis_id, *, explicit_human_validation=F
     out = deepcopy(hypotheses)
     for h in out:
         if h.get("id") == hypothesis_id:
-            h["confirmations"] = h.get("confirmations", 0) + (0 if explicit_human_validation else 1)
             if explicit_human_validation:
+                if h.get("explicit_human_validation"):
+                    return "NO_CHANGE", deepcopy(hypotheses)
                 h["explicit_human_validation"] = True
+                return "CHANGE", out
+            h["confirmations"] = h.get("confirmations", 0) + 1
             return "CHANGE", out
     return "NOT_FOUND", out
 
@@ -58,6 +71,11 @@ def derive_rule(hypotheses, rules, *, hypothesis_id, minimum_confirmations=3):
         "confirmations": h.get("confirmations", 0),
         "explicit_human_validation": h.get("explicit_human_validation", False),
     }
+    existing = next((x for x in rules if x.get("id") == record["id"]), None)
+    if existing is not None:
+        if existing == record:
+            return "NO_CHANGE", deepcopy(rules), record["id"]
+        return "RULE_CONFLICT", deepcopy(rules), None
     status, out = upsert_by_id(rules, record)
     return status, out, record["id"]
 
@@ -68,6 +86,8 @@ def derive_principle(rules, principles, *, rule_id, human_approved=False):
     r = next((x for x in rules if x.get("id") == rule_id), None)
     if r is None:
         return "NOT_FOUND", deepcopy(principles), None
+    if r.get("status") not in {None, "active"}:
+        return "NOT_FOUND", deepcopy(principles), None
     record = {
         "id": f"principle:{rule_id.removeprefix('rule:')}",
         "type": "principle",
@@ -75,5 +95,10 @@ def derive_principle(rules, principles, *, rule_id, human_approved=False):
         "derived_from": rule_id,
         "human_approved": True,
     }
+    existing = next((x for x in principles if x.get("id") == record["id"]), None)
+    if existing is not None:
+        if existing == record:
+            return "NO_CHANGE", deepcopy(principles), record["id"]
+        return "PRINCIPLE_CONFLICT", deepcopy(principles), None
     status, out = upsert_by_id(principles, record)
     return status, out, record["id"]

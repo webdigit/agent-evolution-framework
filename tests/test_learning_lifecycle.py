@@ -1,4 +1,5 @@
 from aef.learning_lifecycle import observe, derive_hypothesis, confirm_hypothesis, derive_rule, derive_principle
+from copy import deepcopy
 
 
 def test_single_observation_does_not_become_hypothesis():
@@ -34,6 +35,18 @@ def test_hypothesis_needs_three_confirmations_for_rule_by_default():
     assert status == "CHANGE" and rid == "rule:p"
 
 
+def test_explicit_human_validation_is_idempotent():
+    obs=[]; hyps=[]
+    for i in (1,2):
+        _, obs = observe(obs, observation_id=f"O{i}", summary="x", pattern_key="p")
+    _, hyps, hid = derive_hypothesis(obs, hyps, pattern_key="p")
+    s1, hyps = confirm_hypothesis(hyps, hid, explicit_human_validation=True)
+    s2, hyps2 = confirm_hypothesis(hyps, hid, explicit_human_validation=True)
+    assert s1 == "CHANGE" and s2 == "NO_CHANGE"
+    assert hyps2[0]["confirmations"] == 0
+    assert hyps2[0]["explicit_human_validation"] is True
+
+
 def test_explicit_human_validation_can_promote_hypothesis_to_rule():
     obs=[]; hyps=[]; rules=[]
     for i in (1,2):
@@ -42,6 +55,21 @@ def test_explicit_human_validation_can_promote_hypothesis_to_rule():
     _, hyps = confirm_hypothesis(hyps, hid, explicit_human_validation=True)
     status, rules, rid = derive_rule(hyps, rules, hypothesis_id=hid)
     assert status == "CHANGE" and rid == "rule:p"
+
+
+def test_rule_conflict_on_replay_with_divergent_body():
+    obs=[]; hyps=[]; rules=[]
+    for i in (1,2):
+        _, obs = observe(obs, observation_id=f"O{i}", summary="x", pattern_key="p")
+    _, hyps, hid = derive_hypothesis(obs, hyps, pattern_key="p")
+    for _ in range(3):
+        _, hyps = confirm_hypothesis(hyps, hid)
+    status, rules, rid = derive_rule(hyps, rules, hypothesis_id=hid)
+    assert status == "CHANGE" and rid == "rule:p"
+    tampered = deepcopy(hyps)
+    tampered[0]["confirmations"] = 99
+    status2, _, _ = derive_rule(tampered, rules, hypothesis_id=hid)
+    assert status2 == "RULE_CONFLICT"
 
 
 def test_principle_never_promotes_without_human_approval():

@@ -1,0 +1,12 @@
+{
+  "protocol": "aef.learning.validate.submit/v1",
+  "rules": [
+    "rule:init-dry-run"
+  ],
+  "decision": {
+    "source": "human",
+    "actor": "Alex Example",
+    "decided_at": "2026-08-21T10:00:00Z",
+    "approved": true
+  }
+}

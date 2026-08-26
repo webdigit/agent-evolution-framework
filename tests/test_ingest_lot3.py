@@ -13,7 +13,12 @@ import pytest
 
 from aef import cli
 from aef.filesystem import EVALUATION_TRANSACTION_PATH
-from aef.ingest_ops import INGEST_DERIVED_ANNOUNCEMENT, INGEST_DERIVED_PREFIXES
+from aef.ingest_ops import (
+    INGEST_CONFIRMATION_ANNOUNCEMENT,
+    INGEST_DERIVED_ANNOUNCEMENT,
+    INGEST_DERIVED_PREFIXES,
+    INGEST_RULE_DERIVATION_ANNOUNCEMENT,
+)
 from aef.ingest_intake import InvalidIngestSubmissionError, validate_ingest_submission
 from aef.record_document import build_persisted_record
 from tests.test_cli_ingest import (
@@ -214,3 +219,5 @@ def test_ingest_derived_prefixes_must_be_announced_in_cli():
     ingest = next(action for action in parser._actions if action.dest == "command")
     ingest_parser = ingest.choices["ingest"]
     assert INGEST_DERIVED_ANNOUNCEMENT in (ingest_parser.description or "")
+    assert INGEST_CONFIRMATION_ANNOUNCEMENT in (ingest_parser.description or "")
+    assert INGEST_RULE_DERIVATION_ANNOUNCEMENT in (ingest_parser.description or "")

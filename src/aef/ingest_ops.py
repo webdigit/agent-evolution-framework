@@ -25,6 +25,12 @@ from .ingest_intake import (
 )
 from .knowledge import EvidenceCapExceededError
 from .learning_engine import ingest_events
+from .learning_confirmation import (
+    CONFIRMATION_ELIGIBLE_KINDS,
+    CONFIRMATION_IGNORED_KINDS,
+    apply_ingest_confirmations,
+)
+from .learning_derivation import DerivationConflictError, apply_eligible_rule_derivations
 from .record_document import (
     InvalidPersistedRecordError,
     InvalidRecordSubmissionError,
@@ -161,6 +167,7 @@ def _projected(state: dict[str, Any]) -> dict[str, list[str]]:
         "signals": _ids(state.get("signals") or []),
         "observations": _ids(state.get("observations") or []),
         "hypotheses": _ids(state.get("hypotheses") or []),
+        "rules": _ids(state.get("rules") or []),
     }
 
 
@@ -194,6 +201,17 @@ def plan_ingest(
             _, next_state = ingest_events(knowledge, events)
             next_state = attach_source_records(next_state, citations)
             next_state = merge_existing_source_records(knowledge, next_state)
+            _, next_state, confirmation_report = apply_ingest_confirmations(
+                next_state, events, citations,
+            )
+            try:
+                _, next_state, rules_derived = apply_eligible_rule_derivations(next_state)
+            except DerivationConflictError as exc:
+                _blocked(
+                    exc.code,
+                    str(exc),
+                    exc.details,
+                )
         except EvidenceCapExceededError as exc:
             _blocked(
                 exc.code,
@@ -217,8 +235,14 @@ def plan_ingest(
             "projected": _projected(next_state),
             "knowledge_path": KNOWLEDGE_PATH,
             "human_action_required": False,
+            "confirmations_applied": confirmation_report["confirmations_applied"],
+            "kinds_ignored": confirmation_report["kinds_ignored"],
+            "rules_derived": rules_derived,
         }
-        meta: dict[str, Any] = {}
+        meta: dict[str, Any] = {
+            "confirmation_eligible_kinds": sorted(CONFIRMATION_ELIGIBLE_KINDS),
+            "confirmation_ignored_kinds": sorted(CONFIRMATION_IGNORED_KINDS),
+        }
         if status == "NO_CHANGE" or dry_run:
             diff = (
                 {"created": [], "modified": [], "removed": []}
@@ -241,6 +265,16 @@ INGEST_DERIVED_PREFIXES = (
 
 INGEST_DERIVED_ANNOUNCEMENT = (
     "Derives learning signals, observations, and candidate hypotheses only."
+)
+
+INGEST_CONFIRMATION_ANNOUNCEMENT = (
+    "May increment hypothesis confirmations for human_correction and "
+    "rule_mismatch events only; announces confirmations applied and ignored kinds."
+)
+
+INGEST_RULE_DERIVATION_ANNOUNCEMENT = (
+    "Derives active rules automatically when a hypothesis gate opens "
+    "(confirmations threshold or explicit human validation); announces rules derived."
 )
 
 

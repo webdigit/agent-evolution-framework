@@ -17,6 +17,7 @@ SCHEMAS = {
     "evaluation.schema.json",
     "exploration.schema.json",
     "knowledge.schema.json",
+    "learning-validation-submission.schema.json",
     "manifest.schema.json",
     "migrations.schema.json",
     "policies.schema.json",
@@ -31,6 +32,9 @@ DOCUMENTATION_EXAMPLES = {
     "recording.json",
     "ingest.json",
     "competency-declaration.json",
+    "learning-validation.json",
+    "learning-ingest-hypothesis.json",
+    "learning-principle-validation.json",
 }
 FORBIDDEN_PARTS = {
     ".agent", ".venv", "__pycache__", ".pytest_cache", "build", "dist",

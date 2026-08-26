@@ -1,0 +1,18 @@
+{
+  "protocol": "aef.learning.validate.submit/v1",
+  "hypotheses": [
+    "hypothesis:init-dry-run"
+  ],
+  "records": [
+    {
+      "record_id": "review-failed-init",
+      "digest": "sha256:40beb31595e58d27ceef070d74ab003ffc53957a03c18fd9f7b32699d5eb6634"
+    }
+  ],
+  "decision": {
+    "source": "human",
+    "actor": "Alex Example",
+    "decided_at": "2026-08-21T10:00:00Z",
+    "approved": true
+  }
+}

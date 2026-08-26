@@ -40,6 +40,9 @@ def _sdist(
         "agent-evolution-framework-0.1.0/docs/examples/recording.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/ingest.json": b"{}",
         "agent-evolution-framework-0.1.0/docs/examples/competency-declaration.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/learning-validation.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/learning-ingest-hypothesis.json": b"{}",
+        "agent-evolution-framework-0.1.0/docs/examples/learning-principle-validation.json": b"{}",
         **{
             f"agent-evolution-framework-0.1.0/src/aef/schemas/{schema}": b"{}"
             for schema in SCHEMAS

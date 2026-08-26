@@ -49,6 +49,8 @@ def test_all_install_replay_and_remove(tmp_path, capsys):
     assert (tmp_path / "GEMINI.md").read_bytes() == GEMINI_BYTES
     assert (tmp_path / "docs" / "runtime.md").is_file()
     assert b"AEF:RUNTIME:BEGIN" in (tmp_path / "docs" / "runtime.md").read_bytes()
+    assert (tmp_path / "docs" / "knowledge.md").is_file()
+    assert b"AEF:LEARNING:BEGIN" in (tmp_path / "docs" / "knowledge.md").read_bytes()
     assert not (tmp_path / ".claude").exists()
 
     code2, envelope2, _ = invoke(

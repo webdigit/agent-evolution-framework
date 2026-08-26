@@ -100,16 +100,20 @@ aef integrate agents [--status|--remove] [--dry-run] [--scope project]
 aef integrate claude [--status|--remove] [--dry-run] [--scope project]
 aef integrate gemini [--status|--remove] [--dry-run] [--scope project]
 aef integrate runtime [--status|--remove] [--dry-run] [--scope project]
+aef integrate learning [--status|--remove] [--dry-run] [--scope project]
 aef integrate all [--status|--remove] [--dry-run] [--scope project]
 aef --json integrate claude --status
 ```
 
 Install project-local guidance doors. `AGENTS.md` holds the only managed copy
-of readable rules (citations to `.agent/core/` and `docs/runtime.md`).
-`CLAUDE.md` and `GEMINI.md` are doorbells without doctrine rules.
-`integrate runtime` produces `docs/runtime.md` as a pure snapshot of
-`aef doctor` (divergence is périmé/stale, never catalog tampering); `doctor`
-remains read-only.
+of readable rules (citations to `.agent/core/`, `docs/runtime.md`, and
+`docs/knowledge.md`). `CLAUDE.md` and `GEMINI.md` are doorbells without
+doctrine rules. `integrate runtime` produces `docs/runtime.md` as a pure
+snapshot of `aef doctor` (divergence is périmé/stale, never catalog
+tampering); `doctor` remains read-only. `integrate learning` produces
+`docs/knowledge.md` as a pure snapshot of active rules and principles from
+persisted knowledge (divergence is périmé/stale, never catalog tampering);
+it does not write `.agent/knowledge/`.
 `integrate claude` remains stable; it installs the root doorbell and does not
 create a new `.claude/CLAUDE.md` bridge. An existing brownfield bridge is
 reported by `--status` and never rewritten silently.
@@ -149,6 +153,29 @@ Interrupted applies leave a distinct journal
 `--recover` (start with `--dry-run`). While that journal exists, other
 mutations are blocked. AUDIT reports brownfield competencies without a
 declaration event as a non-blocking warning; it never invents provenance.
+
+See [Canonical input files](input-files.md) for an executable example.
+
+## LEARNING VALIDATE
+
+```console
+aef learning validate --validation FILE [--dry-run]
+aef --json learning validate --validation FILE [--dry-run]
+```
+
+Apply explicit human validation to one or more **candidate** hypotheses cited
+by derived id (`hypothesis:…`), and/or promote **active** rules to principles
+by citing derived `rule:…` ids. AEF sets `explicit_human_validation: true` on
+hypotheses (without changing `confirmations`), derives rules when the hypothesis
+gate opens, and derives principles only when `rules` are cited with a human
+`decision` block. It does not ingest events, promote competencies, or invoke
+EVALUATE.
+
+`--json` is global and must precede the command. `--dry-run` projects the exact
+knowledge change without writing. Replaying the same validation returns
+`NO_CHANGE`. A missing hypothesis, a hypothesis already promoted to a rule, a
+missing cited record, or a digest mismatch is `BLOCKED` (exit 4) with no write.
+An invalid document or missing human decision is `ERROR` (exit 3).
 
 See [Canonical input files](input-files.md) for an executable example.
 
