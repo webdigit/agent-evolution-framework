@@ -4,6 +4,49 @@ All notable changes to AEF are documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-26
+
+Package 2.1.0 still implements the V1 workspace contract
+(`framework_version` / `schema_version` `1.0.0`, profile `aef-v1`). There is
+no breaking change to submitted input schemas or workspace files. On a valid V1
+workspace already at `schema_version` `1.0.0`, `aef upgrade --check` and
+`aef upgrade` return `NO_CHANGE`.
+
+### Added
+
+- **`aef integrate runtime`:** installs or refreshes the managed environment map
+  at `docs/runtime.md` as a pure snapshot of `aef doctor`. `doctor` remains
+  read-only; when the map no longer matches the host it is reported as
+  **périmé** (stale), not as catalog tampering.
+- **Workspace resolution:** when `--workspace` is omitted, the CLI walks up from
+  the current directory to the nearest ancestor that contains `.agent/`, and
+  reports when relocation occurred. An explicit `--workspace` path is never
+  relocated.
+- **Submitted identifier rules:** the `:` separator is reserved for identifiers
+  derived by AEF. A colon in a submitted `record_id`, event `id`, `pattern_key`,
+  or `competency` is rejected with an explicit message (`use '.' or '-'
+  instead`), not a silent schema mismatch.
+
+### Changed
+
+- CI test runs now pass `-rs` to pytest so every skipped test and its reason
+  appear in the job log.
+
+### Documentation
+
+- Review conduct for implementation units is stated in `AGENTS.md` (blocking
+  vs same-commit findings, two-pass ceiling).
+
+### Boundaries
+
+- No breaking change. Input submission schemas are unchanged; the workspace
+  contract stays `1.0.0`.
+- `aef upgrade` migrates workspace files toward the contract of the already
+  installed package only; it is not a software update and returns `NO_CHANGE`
+  on a conformant workspace.
+- `integrate runtime` does not run automatically on install or upgrade; the
+  operator runs it in the consumer workspace when needed.
+
 ## [2.0.0] - 2026-08-24
 
 Package 2.0.0 still implements the V1 workspace contract
