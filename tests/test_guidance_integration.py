@@ -32,9 +32,24 @@ def _project():
 def test_agents_segment_cites_doctrine_and_runtime_without_install_required():
     assert b".agent/core/constitution.md" in AGENTS_BYTES
     assert b"docs/runtime.md" in AGENTS_BYTES
+    assert b"aef integrate runtime" in AGENTS_BYTES
     assert b"INSTALL_REQUIRED" not in AGENTS_BYTES
     assert b"Selon l'agent" not in AGENTS_BYTES
     assert inspect_door("agents", AGENTS_BYTES)["state"] == "installed"
+
+
+def test_agents_1_0_0_remains_recognized_and_upgrades():
+    from aef.guidance_integration import AGENTS_BYTES_1_0_0
+
+    assert inspect_door("agents", AGENTS_BYTES_1_0_0)["state"] == "installed"
+    assert inspect_door("agents", AGENTS_BYTES_1_0_0)["version"] == "1.0.0"
+    status, _, meta = plan_door_integration(
+        _project(), AGENTS_BYTES_1_0_0, door="agents",
+    )
+    assert status == "CHANGE"
+    assert meta["integration_version"] == "1.1.0"
+    assert inspect_door("agents", meta["desired_bytes"])["state"] == "installed"
+    assert inspect_door("agents", meta["desired_bytes"])["version"] == "1.1.0"
 
 
 def test_doorbells_contain_no_doctrine_rules():

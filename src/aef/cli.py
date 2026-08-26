@@ -31,7 +31,11 @@ from .filesystem import (
 from .upgrade_plan import MigrationFailure
 from .upgrade_ops import run_upgrade
 from .runtime_discovery import DECISION_INSTALL_REQUIRED, INSTALL_REQUIRED_EXIT
-from .runtime_doctor import diagnose_runtime
+from .runtime_doctor import (
+    diagnose_runtime,
+    render_runtime_card,
+    wrap_runtime_segment,
+)
 from .consolidation import InvalidConsolidationInputError
 from .knowledge_state import InvalidKnowledgeStateError
 from .evaluation_engine import (
@@ -70,6 +74,7 @@ from .guidance_integration import (
     AGENTS_PATH,
     plan_claude_door,
     plan_door_integration,
+    plan_runtime_integration,
 )
 from .operations import (
     InvalidDiscoveryRegistryError,
@@ -606,8 +611,25 @@ def _render_human(envelope: dict[str, Any]) -> str:
                         f"[OK] Guidance integration ({integration}) is not installed\n\n"
                         f"Workspace : {workspace}{workspace_suffix}\nWarnings  : {warning_text}\n"
                     )
+                doors = result.get("doors") or {}
+                stale_doors = [
+                    name for name, info in doors.items()
+                    if (info.get("bridge") or {}).get("state") == "stale"
+                    or info.get("freshness") == "stale"
+                ]
                 audit = _escape_human_value(result.get("audit", "unknown"))
                 reviews = _escape_human_value(result.get("pending_reviews", "unknown"))
+                if stale_doors:
+                    stale_list = ", ".join(
+                        _escape_human_value(name) for name in stale_doors
+                    )
+                    return (
+                        f"[OK] Guidance integration ({integration}) is installed\n\n"
+                        f"Freshness : périmé (stale) — {stale_list}; "
+                        "regenerate with `aef integrate runtime`\n"
+                        f"Doctrine : loaded\nAudit    : {audit}\n"
+                        f"Reviews  : {reviews} pending\nWarnings : {warning_text}\n"
+                    )
                 return (
                     f"[OK] Guidance integration ({integration}) is healthy\n\n"
                     f"Doctrine : loaded\nAudit    : {audit}\n"
@@ -983,12 +1005,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "Install, inspect, or remove the managed GEMINI.md doorbell (no doctrine rules).",
     )
     _door_parser(
-        "all",
-        "manage AGENTS.md plus Claude and Gemini doorbells",
+        "runtime",
+        "manage the docs/runtime.md environment map",
         (
-            "Apply, inspect, or remove the shared commun and root doorbells together. "
-            "No door is written if any requested door is blocked. "
-            "Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
+            "Install, inspect, or remove the managed runtime environment map "
+            "(pure render of `aef doctor`). Divergence is périmé/stale, never "
+            "catalog tampering. Does not write via doctor."
+        ),
+    )
+    _door_parser(
+        "all",
+        "manage AGENTS.md, doorbells, and the runtime map",
+        (
+            "Apply, inspect, or remove the shared commun, root doorbells, and "
+            "runtime map together. No door is written if any requested door is "
+            "blocked. Does not create or rewrite a legacy .claude/CLAUDE.md bridge."
         ),
     )
     upgrade_parser = commands.add_parser(
@@ -1691,7 +1722,7 @@ def _claude_settings_warnings(workspace: Path) -> list[str]:
 
 
 def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    if args.integration not in {"agents", "claude", "gemini", "all"}:
+    if args.integration not in {"agents", "claude", "gemini", "runtime", "all"}:
         raise CLIInputError("unsupported_integration", "The integration is unsupported.")
     if args.scope != "project":
         raise CLIInputError(
@@ -1710,11 +1741,11 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             doctrine_error = "missing_aef_doctrine"
 
     requested = (
-        ["agents", "claude", "gemini"] if args.integration == "all"
+        ["agents", "claude", "gemini", "runtime"] if args.integration == "all"
         else [args.integration]
     )
     if args.remove and args.integration == "all":
-        requested = ["gemini", "claude", "agents"]
+        requested = ["runtime", "gemini", "claude", "agents"]
     plan_order = list(requested)
     if (
         not args.status_only
@@ -1723,6 +1754,11 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         and "agents" not in plan_order
     ):
         plan_order = ["agents", *plan_order]
+
+    runtime_expected: bytes | None = None
+    if "runtime" in plan_order:
+        doctor_result = diagnose_runtime(workspace)
+        runtime_expected = wrap_runtime_segment(render_runtime_card(doctor_result))
 
     aggregate_status = "NO_CHANGE"
     aggregate_diff = {"created": [], "modified": [], "removed": []}
@@ -1751,6 +1787,15 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 else:
                     existing = root_existing
                     relative = meta.get("bridge_path") or door_path("claude")
+            elif door == "runtime":
+                assert runtime_expected is not None
+                existing = read_guidance_file(workspace, door_path("runtime"))
+                status, _, meta = plan_runtime_integration(
+                    current, existing,
+                    expected_bytes=runtime_expected,
+                    remove=args.remove, status_only=args.status_only,
+                )
+                relative = meta.get("bridge_path") or door_path("runtime")
             else:
                 existing = read_guidance_file(workspace, door_path(door))
                 status, _, meta = plan_door_integration(
@@ -1808,7 +1853,7 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         meta = item["meta"]
         status = item["status"]
         root_state = (meta.get("bridge") or {}).get("state")
-        installed = root_state == "installed"
+        installed = root_state in {"installed", "stale"}
         if item["door"] == "claude":
             legacy_state = (meta.get("legacy_bridge") or {}).get("state")
             if root_state == "installed":
@@ -1829,6 +1874,8 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         state = (item["meta"].get("bridge") or {}).get("state")
         if state == "installed":
             return True
+        if state == "stale":
+            return False
         if item["door"] == "claude":
             legacy = (item["meta"].get("legacy_bridge") or {}).get("state")
             if state == "absent" and legacy == "installed":
@@ -1863,6 +1910,9 @@ def _run_integrate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             and not any_blocked
         ):
             extra["co_installed"] = True
+        freshness = item["meta"].get("freshness")
+        if freshness is not None:
+            extra["freshness"] = freshness
         report = (
             item["door"] in requested
             or extra.get("co_installed")
