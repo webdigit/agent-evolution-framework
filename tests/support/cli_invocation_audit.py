@@ -4,6 +4,13 @@ Scans every ``*.py`` under ``tests/`` (no frozen allow-list of files). A new
 subprocess that targets the console script (``aef`` / ``aef.exe``),
 ``installed_aef_script(...)``, or a legacy ``AEF`` string path fails the audit.
 
+Named exception (sole authorized console-script subprocess site):
+
+- ``test_console_script_entry.py`` — smoke test for the published ``aef`` script
+  from ``pyproject.toml``; installs a throwaway venv and compares against
+  ``python -m aef``. CI runs it; WDAC hosts skip with an explicit pytest reason.
+  Do not add other files here without the same contract.
+
 Known limits (not silent bounds — documented so the guard is not overclaimed):
 
 - Only ``subprocess.run`` / ``Popen`` / ``call`` / ``check_call`` /
@@ -28,6 +35,13 @@ _SUBPROCESS_FUNCS = frozenset(
     {"run", "Popen", "call", "check_call", "check_output"}
 )
 
+# Sole file allowed to subprocess the published console script (see module docstring).
+_CONSOLE_SCRIPT_INVOCATION_EXCEPTIONS = frozenset(
+    {
+        "test_console_script_entry.py",
+    }
+)
+
 # Relative paths under tests/ that may *define* or *unit-test* the locator.
 # They still must not pass the locator result to subprocess (checked below).
 _LOCATOR_UNIT_FILES = frozenset(
@@ -36,6 +50,10 @@ _LOCATOR_UNIT_FILES = frozenset(
         "test_cli_launcher.py",
     }
 )
+
+
+def _file_has_console_script_exception(relative: str) -> bool:
+    return relative in _CONSOLE_SCRIPT_INVOCATION_EXCEPTIONS
 
 
 def _is_subprocess_call(node: ast.Call) -> bool:
@@ -160,6 +178,8 @@ def _list_is_module_aef_argv(node: ast.List) -> bool:
 
 def find_console_script_cli_invocations(source: str, *, relative: str) -> list[str]:
     """Return human-readable findings for console-script CLI subprocess argv."""
+    if _file_has_console_script_exception(relative):
+        return []
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
@@ -230,7 +250,7 @@ def find_forbidden_installed_aef_script_imports(
     source: str, *, relative: str
 ) -> list[str]:
     """Fail when a non-locator test imports ``installed_aef_script`` (new sites)."""
-    if relative in _LOCATOR_UNIT_FILES:
+    if relative in _LOCATOR_UNIT_FILES or _file_has_console_script_exception(relative):
         return []
     try:
         tree = ast.parse(source)

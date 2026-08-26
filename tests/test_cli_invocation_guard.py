@@ -1,10 +1,14 @@
-"""Guard: CLI subprocesses use ``python -m aef``, never the console script."""
+"""Guard: CLI subprocesses use ``python -m aef``, never the console script.
+
+Exception: ``test_console_script_entry.py`` (registry in cli_invocation_audit).
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from tests.support.cli_invocation_audit import (
+    _CONSOLE_SCRIPT_INVOCATION_EXCEPTIONS,
     audit_tests_tree_for_console_script_cli,
     find_console_script_cli_invocations,
 )
@@ -15,6 +19,12 @@ TESTS_ROOT = Path(__file__).resolve().parent
 def test_tests_tree_does_not_invoke_aef_console_script():
     findings = audit_tests_tree_for_console_script_cli(TESTS_ROOT)
     assert findings == [], "\n".join(findings)
+
+
+def test_console_script_exception_registry_is_sole_entry_point_file():
+    assert _CONSOLE_SCRIPT_INVOCATION_EXCEPTIONS == frozenset(
+        {"test_console_script_entry.py"}
+    )
 
 
 def test_console_script_invocation_guard_detects_new_sites():

@@ -7,8 +7,9 @@ import sysconfig
 def aef_cli_argv(*args: str | os.PathLike[str]) -> list[str]:
     """Build a CLI argv that invokes ``python -m aef``.
 
-    Tests must never spawn the console script (``aef`` / ``aef.exe``): on some
-    hosts WDAC blocks it while ``sys.executable -m aef`` remains usable.
+    The main suite uses this form because WDAC on some development hosts blocks
+    ``aef.exe``; console-script coverage lives in ``test_console_script_entry.py``
+    (CI runs it; blocked hosts skip with an explicit reason).
     """
     return [sys.executable, "-m", "aef", *(str(item) for item in args)]
 

@@ -10,6 +10,10 @@ aef [--workspace PATH] [--json | --human] [--compact] COMMAND
 use `--json` explicitly. Diagnostics go to stderr; stdout contains one human
 rendering or one `aef.cli/v1` JSON document.
 
+The local pytest suite invokes `python -m aef`; the published console script is
+smoke-tested in CI via `tests/test_console_script_entry.py` (WDAC-blocked hosts
+skip that test with an explicit reason).
+
 ## INIT
 
 ```console
