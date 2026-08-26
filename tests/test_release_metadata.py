@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_distribution_version_has_one_python_source_of_truth():
     configuration = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert __version__ == "2.1.0"
+    assert __version__ == "2.2.0"
     assert _distribution_version() == __version__
     assert configuration["project"]["dynamic"] == ["version"]
     assert "version" not in configuration["project"]
@@ -46,7 +46,7 @@ def test_module_entry_point_reports_release_version():
     )
 
     assert result.returncode == 0
-    assert result.stdout.strip() == "aef 2.1.0"
+    assert result.stdout.strip() == "aef 2.2.0"
     assert result.stderr == ""
 
 
